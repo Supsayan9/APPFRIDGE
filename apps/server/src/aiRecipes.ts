@@ -3,6 +3,16 @@ import { getInventoryInsight } from '@appfridge/shared';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
+/** Скільки днів (включно) вважаємо «термін підходить до кінця» для AI — ширше за UI-статус expiring (3 дні). */
+const SOON_EXPIRY_DAYS = 7;
+
+export class AiNotConfiguredError extends Error {
+  constructor() {
+    super('AI_API_KEY_NOT_CONFIGURED');
+    this.name = 'AiNotConfiguredError';
+  }
+}
+
 type ProductPayload = {
   name: string;
   quantity: number;
@@ -13,26 +23,84 @@ type ProductPayload = {
   status: string;
 };
 
-function buildProductContext(items: InventoryItem[]): ProductPayload[] {
-  return items
-    .map((item) => {
-      const insight = getInventoryInsight(item);
-      return {
-        name: item.name,
-        quantity: item.quantity,
-        location: item.location,
-        category: item.category ?? null,
-        expirationDate: item.expirationDate,
-        daysLeft: insight.daysLeft,
-        status: insight.status
-      };
-    })
+function toPayload(item: InventoryItem): ProductPayload {
+  const insight = getInventoryInsight(item);
+  return {
+    name: item.name,
+    quantity: item.quantity,
+    location: item.location,
+    category: item.category ?? null,
+    expirationDate: item.expirationDate,
+    daysLeft: insight.daysLeft,
+    status: insight.status
+  };
+}
+
+function isSoonOrExpired(daysLeft: number | null): boolean {
+  if (daysLeft === null) {
+    return false;
+  }
+  return daysLeft < 0 || daysLeft <= SOON_EXPIRY_DAYS;
+}
+
+/**
+ * primary — рецепти саме з цих позицій (прострочено або залишилось ≤ SOON_EXPIRY_DAYS днів).
+ * secondary — свіжіші, лише як додаток до поєднання.
+ */
+function buildAiPayload(items: InventoryItem[]): {
+  primary_use: ProductPayload[];
+  secondary_optional: ProductPayload[];
+} {
+  const enriched = items.map((item) => ({ item, payload: toPayload(item) }));
+
+  const priority = enriched
+    .filter(({ payload }) => isSoonOrExpired(payload.daysLeft))
     .sort((a, b) => {
-      const al = a.daysLeft ?? 9999;
-      const bl = b.daysLeft ?? 9999;
+      const al = a.payload.daysLeft ?? 9999;
+      const bl = b.payload.daysLeft ?? 9999;
       return al - bl;
     })
-    .slice(0, 14);
+    .map(({ payload }) => payload);
+
+  if (priority.length > 0) {
+    const primaryIds = new Set(enriched.filter((e) => isSoonOrExpired(e.payload.daysLeft)).map((e) => e.item.id));
+    const secondary = enriched
+      .filter((e) => !primaryIds.has(e.item.id))
+      .sort((a, b) => {
+        const al = a.payload.daysLeft ?? 9999;
+        const bl = b.payload.daysLeft ?? 9999;
+        return al - bl;
+      })
+      .slice(0, 8)
+      .map(({ payload }) => payload);
+
+    return {
+      primary_use: priority.slice(0, 14),
+      secondary_optional: secondary
+    };
+  }
+
+  const nearest = enriched
+    .sort((a, b) => {
+      const al = a.payload.daysLeft ?? 9999;
+      const bl = b.payload.daysLeft ?? 9999;
+      return al - bl;
+    })
+    .slice(0, 12)
+    .map(({ payload }) => payload);
+
+  return {
+    primary_use: nearest,
+    secondary_optional: []
+  };
+}
+
+export function resolveOpenAiApiKey(): string | null {
+  const fromOpenAi = process.env.OPENAI_API_KEY?.trim();
+  if (fromOpenAi) {
+    return fromOpenAi;
+  }
+  return process.env.AI_API_KEY?.trim() || null;
 }
 
 function isUrgency(value: unknown): value is RecipeSuggestion['urgency'] {
@@ -85,17 +153,25 @@ function normalizeRecipes(raw: unknown): RecipeSuggestion[] {
 }
 
 export async function generateAiRecipeSuggestions(items: InventoryItem[]): Promise<RecipeSuggestion[]> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiKey = resolveOpenAiApiKey();
   if (!apiKey) {
-    throw new Error('OPENAI_API_KEY is not configured');
+    throw new AiNotConfiguredError();
   }
 
-  const products = buildProductContext(items);
-  if (products.length === 0) {
+  if (items.length === 0) {
     return [];
   }
 
+  const { primary_use, secondary_optional } = buildAiPayload(items);
+
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+  const userBody = {
+    hint:
+      'primary_use — продукти з найкритичнішим терміном (прострочено або залишилось не більше 7 днів). Рецепти мають в першу чергу витрачати саме їх. secondary_optional — лише як легкий допоміжний набір для поєднання, не основа страви.',
+    primary_use,
+    secondary_optional
+  };
 
   const response = await fetch(OPENAI_URL, {
     method: 'POST',
@@ -112,15 +188,17 @@ export async function generateAiRecipeSuggestions(items: InventoryItem[]): Promi
           role: 'system',
           content: [
             'Ти кулінарний помічник українського застосунку AppFridge.',
-            'Користувач надіслав список продуктів з полями daysLeft (днів до кінця терміну) та status: fresh | expiring | expired.',
-            'Пріоритет: спочатку пропонуй страви з тих, що expiring або expired; для expired зазнач у description, що зіпсовані/небезпечні продукти треба викинути й не використовувати — рецепт лише для тих позицій, які ще можна вважати придатними (наприклад сухі/консервовані), або явно скажи «не вживати».',
-            'Поверни СТРОГО JSON об’єкт виду: {"recipes":[{"title":"...","description":"...","ingredients":["..."],"steps":["..."],"urgency":"high"|"medium"}]}.',
-            '1–3 рецепти; кроки короткі й конкретні; інгредієнти українською; urgency high якщо є expiring/expired.'
+            'У JSON від користувача є primary_use (термін критичний або закінчився) та secondary_optional (свіжіше).',
+            'Обов’язково: основні страви будуй навколо primary_use — назви конкретні продукти з цього списку в інгредієнтах або описі.',
+            'secondary_optional використовуй обережно, невеликими порціями, лише якщо логічно доповнює смак.',
+            'Для простроченого (status expired або daysLeft < 0): наголоси на безпеці — швидкопсувне викинути; рецепт лише якщо реально безпечна категорія (сухі спеції тощо), інакше явно «не вживати».',
+            'Поверни СТРОГО JSON: {"recipes":[{"title":"...","description":"...","ingredients":["..."],"steps":["..."],"urgency":"high"|"medium"}]}.',
+            '1–3 рецепти; кроки короткі; мова українська; urgency high якщо в primary_use є expired або daysLeft ≤ 3.'
           ].join(' ')
         },
         {
           role: 'user',
-          content: JSON.stringify({ products })
+          content: JSON.stringify(userBody)
         }
       ]
     })

@@ -254,7 +254,7 @@ export default function App() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>AI помічник</Text>
           <Text style={styles.sectionText}>
-            Запит до моделі на сервері: персональні ідеї страв з урахуванням дат придатності. Потрібен OPENAI_API_KEY у бекенді.
+            Рецепти з продуктів, у яких термін найближчий (до 7 днів або прострочено); решта лише як легкий допоміжний список. На сервері потрібен OPENAI_API_KEY або AI_API_KEY (не плутати з PEXELS_KEY).
           </Text>
           <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void handleAiRecipes()} disabled={aiLoading}>
             <Text style={styles.buttonTextLight}>{aiLoading ? 'Генеруємо…' : 'Отримати AI-рецепти'}</Text>

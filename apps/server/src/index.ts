@@ -4,7 +4,7 @@ import express from 'express';
 import cron from 'node-cron';
 import { buildRecipeSuggestions, getInventoryInsight, type InventoryItem, type PushRegistration } from '@appfridge/shared';
 import { deleteInventoryItem, initDb, insertInventoryItem, listInventory, savePushToken } from './db.js';
-import { generateAiRecipeSuggestions } from './aiRecipes.js';
+import { AiNotConfiguredError, generateAiRecipeSuggestions } from './aiRecipes.js';
 import { lookupProduct } from './lookup.js';
 import { getUrgentInventory, sendReminderPushes } from './reminders.js';
 
@@ -69,10 +69,11 @@ app.get('/recipes/ai', async (_req, res) => {
     res.json(recipes);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('OPENAI_API_KEY')) {
+    if (error instanceof AiNotConfiguredError || message === 'AI_API_KEY_NOT_CONFIGURED') {
       res.status(503).json({
         error: 'ai_unconfigured',
-        message: 'Додайте OPENAI_API_KEY у .env сервера, щоб увімкнути AI-рецепти.'
+        message:
+          'Додайте ключ OpenAI у .env сервера: OPENAI_API_KEY або AI_API_KEY (https://platform.openai.com/api-keys). PEXELS_KEY — це інший сервіс (фото), для рецептів не підходить.'
       });
       return;
     }
