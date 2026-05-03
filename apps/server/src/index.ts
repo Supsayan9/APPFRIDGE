@@ -73,7 +73,7 @@ app.get('/recipes/ai', async (_req, res) => {
       res.status(503).json({
         error: 'ai_unconfigured',
         message:
-          'Додайте ключ OpenAI у .env сервера: OPENAI_API_KEY або AI_API_KEY (https://platform.openai.com/api-keys). PEXELS_KEY — це інший сервіс (фото), для рецептів не підходить.'
+          'Додайте ключ OpenAI-формату (sk-...) у .env сервера: OPENAI_API_KEY, AI_API_KEY або APIFREE_KEY. PEXELS_KEY — лише фото, для рецептів не підходить.'
       });
       return;
     }

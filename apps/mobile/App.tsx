@@ -254,7 +254,7 @@ export default function App() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>AI помічник</Text>
           <Text style={styles.sectionText}>
-            Рецепти з продуктів, у яких термін найближчий (до 7 днів або прострочено); решта лише як легкий допоміжний список. На сервері потрібен OPENAI_API_KEY або AI_API_KEY (не плутати з PEXELS_KEY).
+            Рецепти з продуктів, у яких термін найближчий (до 7 днів або прострочено); решта лише як легкий допоміжний список. На сервері: OPENAI_API_KEY, AI_API_KEY або APIFREE_KEY (ключ формату sk-..., не PEXELS_KEY).
           </Text>
           <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void handleAiRecipes()} disabled={aiLoading}>
             <Text style={styles.buttonTextLight}>{aiLoading ? 'Генеруємо…' : 'Отримати AI-рецепти'}</Text>

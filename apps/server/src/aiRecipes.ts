@@ -96,11 +96,18 @@ function buildAiPayload(items: InventoryItem[]): {
 }
 
 export function resolveOpenAiApiKey(): string | null {
-  const fromOpenAi = process.env.OPENAI_API_KEY?.trim();
-  if (fromOpenAi) {
-    return fromOpenAi;
+  const candidates = [
+    process.env.OPENAI_API_KEY,
+    process.env.AI_API_KEY,
+    process.env.APIFREE_KEY
+  ];
+  for (const raw of candidates) {
+    const key = raw?.trim();
+    if (key) {
+      return key;
+    }
   }
-  return process.env.AI_API_KEY?.trim() || null;
+  return null;
 }
 
 function isUrgency(value: unknown): value is RecipeSuggestion['urgency'] {
