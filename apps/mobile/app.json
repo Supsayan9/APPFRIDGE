@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "AppFridge",
+    "slug": "appfridge",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.appfridge.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "AppFridge uses the camera to scan product barcodes.",
+        "NSUserNotificationUsageDescription": "AppFridge uses notifications to warn about expiring food."
+      }
+    },
+    "android": {
+      "package": "com.appfridge.mobile",
+      "permissions": ["CAMERA", "POST_NOTIFICATIONS"]
+    },
+    "plugins": [
+      "expo-notifications"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:4000"
+    }
+  }
+}

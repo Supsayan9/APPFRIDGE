@@ -1,0 +1,9 @@
+node_modules
+.expo
+dist
+coverage
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+
