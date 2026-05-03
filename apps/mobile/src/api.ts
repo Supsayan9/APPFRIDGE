@@ -45,6 +45,29 @@ export function fetchRecipes() {
   return request<RecipesResponse>('/recipes');
 }
 
+export async function fetchAiRecipes(): Promise<RecipesResponse> {
+  const response = await fetch(`${apiUrl}/recipes/ai`, {
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    let detail = `Помилка ${response.status}`;
+    try {
+      const body = (await response.json()) as { message?: string };
+      if (body.message) {
+        detail = body.message;
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as RecipesResponse;
+}
+
 export function registerPushToken(payload: PushRegistration) {
   return request<{ ok: true }>('/push/register', {
     method: 'POST',

@@ -153,5 +153,24 @@ export const styles = StyleSheet.create({
     color: '#bfd0db',
     fontSize: 14,
     lineHeight: 20
+  },
+  recipeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2a4a6f',
+    color: '#7dd3fc',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 8,
+    overflow: 'hidden'
+  },
+  recipeSteps: {
+    color: '#d5e4ef',
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 6
   }
 });

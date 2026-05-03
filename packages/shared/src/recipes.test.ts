@@ -36,7 +36,7 @@ describe('recipe suggestions', () => {
   it('builds multiple suggestions from urgent items', () => {
     const recipes = buildRecipeSuggestions(items);
     expect(recipes.length).toBeGreaterThan(1);
-    expect(recipes.some((recipe) => recipe.title.includes('Smoothie'))).toBe(true);
-    expect(recipes.some((recipe) => recipe.title.includes('Soup'))).toBe(true);
+    expect(recipes.some((recipe) => recipe.title.includes('Смузі'))).toBe(true);
+    expect(recipes.some((recipe) => recipe.title.includes('суп'))).toBe(true);
   });
 });

@@ -4,6 +4,7 @@ import express from 'express';
 import cron from 'node-cron';
 import { buildRecipeSuggestions, getInventoryInsight, type InventoryItem, type PushRegistration } from '@appfridge/shared';
 import { deleteInventoryItem, initDb, insertInventoryItem, listInventory, savePushToken } from './db.js';
+import { generateAiRecipeSuggestions } from './aiRecipes.js';
 import { lookupProduct } from './lookup.js';
 import { getUrgentInventory, sendReminderPushes } from './reminders.js';
 
@@ -60,6 +61,26 @@ app.delete('/inventory/:id', (req, res) => {
 
 app.get('/recipes', (_req, res) => {
   res.json(buildRecipeSuggestions(listInventory()));
+});
+
+app.get('/recipes/ai', async (_req, res) => {
+  try {
+    const recipes = await generateAiRecipeSuggestions(listInventory());
+    res.json(recipes);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('OPENAI_API_KEY')) {
+      res.status(503).json({
+        error: 'ai_unconfigured',
+        message: 'Додайте OPENAI_API_KEY у .env сервера, щоб увімкнути AI-рецепти.'
+      });
+      return;
+    }
+    res.status(502).json({
+      error: 'ai_failed',
+      message: message.slice(0, 400)
+    });
+  }
 });
 
 app.get('/insights/urgent', (_req, res) => {
