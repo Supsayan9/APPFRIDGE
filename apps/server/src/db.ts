@@ -45,7 +45,13 @@ export function upsertProduct(product: Product) {
       brand = excluded.brand,
       category = excluded.category,
       imageUrl = excluded.imageUrl
-  `).run(product);
+  `).run({
+    barcode: product.barcode,
+    name: product.name,
+    brand: product.brand ?? null,
+    category: product.category ?? null,
+    imageUrl: product.imageUrl ?? null
+  });
 }
 
 export function findProduct(barcode: string): Product | undefined {
@@ -68,7 +74,18 @@ export function insertInventoryItem(item: InventoryItem) {
     VALUES (
       @id, @barcode, @name, @brand, @category, @imageUrl, @expirationDate, @quantity, @location, @createdAt
     )
-  `).run(item);
+  `).run({
+    id: item.id,
+    barcode: item.barcode,
+    name: item.name,
+    brand: item.brand ?? null,
+    category: item.category ?? null,
+    imageUrl: item.imageUrl ?? null,
+    expirationDate: item.expirationDate,
+    quantity: item.quantity,
+    location: item.location,
+    createdAt: item.createdAt
+  });
 }
 
 export function deleteInventoryItem(id: string) {

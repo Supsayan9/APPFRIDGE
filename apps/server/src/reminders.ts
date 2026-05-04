@@ -12,6 +12,9 @@ interface ExpoPushMessage {
 
 function buildReminderMessage(item: InventoryItem): string {
   const insight = getInventoryInsight(item);
+  if (insight.daysLeft === null) {
+    return `${item.name}: invalid expiration date format.`;
+  }
   if (insight.daysLeft < 0) {
     return `${item.name} is already expired. Remove it or use it if still safe.`;
   }
