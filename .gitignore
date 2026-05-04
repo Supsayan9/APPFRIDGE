@@ -1,5 +1,7 @@
 node_modules
 .expo
+apps/server/.env
+apps/mobile/.env
 dist
 coverage
 *.db
