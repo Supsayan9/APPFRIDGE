@@ -4,7 +4,13 @@ import express from 'express';
 import cron from 'node-cron';
 import { buildRecipeSuggestions, getInventoryInsight, type InventoryItem, type PushRegistration } from '@appfridge/shared';
 import { deleteInventoryItem, initDb, insertInventoryItem, listInventory, savePushToken, upsertProduct } from './db.js';
-import { AiNotConfiguredError, generateAiRecipeSuggestions } from './aiRecipes.js';
+import {
+  AiInvalidApiKeyError,
+  AiNotConfiguredError,
+  AiRateLimitedError,
+  AiServiceUnavailableError,
+  generateAiRecipeSuggestions
+} from './aiRecipes.js';
 import { lookupProduct, normalizeBarcode } from './lookup.js';
 import { normalizeProductCategory } from './category.js';
 import { getUrgentInventory, sendReminderPushes } from './reminders.js';
@@ -105,9 +111,30 @@ app.get('/recipes/ai', async (_req, res) => {
       });
       return;
     }
+    if (error instanceof AiInvalidApiKeyError || message === 'AI_INVALID_API_KEY') {
+      res.status(503).json({
+        error: 'ai_invalid_key',
+        message: 'AI ключ недійсний. Оновіть OPENAI_API_KEY / AI_API_KEY / APIFREE_KEY у apps/server/.env і перезапустіть сервер.'
+      });
+      return;
+    }
+    if (error instanceof AiRateLimitedError || message === 'AI_RATE_LIMITED') {
+      res.status(429).json({
+        error: 'ai_rate_limited',
+        message: 'AI тимчасово перевищив ліміт запитів. Спробуйте ще раз через хвилину.'
+      });
+      return;
+    }
+    if (error instanceof AiServiceUnavailableError || message === 'AI_SERVICE_UNAVAILABLE') {
+      res.status(503).json({
+        error: 'ai_service_unavailable',
+        message: 'AI сервіс тимчасово недоступний. Спробуйте трохи пізніше.'
+      });
+      return;
+    }
     res.status(502).json({
       error: 'ai_failed',
-      message: message.slice(0, 400)
+      message: 'Не вдалося згенерувати AI-рецепти. Перевірте налаштування ключа та спробуйте ще раз.'
     });
   }
 });

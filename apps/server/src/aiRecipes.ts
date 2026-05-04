@@ -13,6 +13,27 @@ export class AiNotConfiguredError extends Error {
   }
 }
 
+export class AiInvalidApiKeyError extends Error {
+  constructor() {
+    super('AI_INVALID_API_KEY');
+    this.name = 'AiInvalidApiKeyError';
+  }
+}
+
+export class AiRateLimitedError extends Error {
+  constructor() {
+    super('AI_RATE_LIMITED');
+    this.name = 'AiRateLimitedError';
+  }
+}
+
+export class AiServiceUnavailableError extends Error {
+  constructor() {
+    super('AI_SERVICE_UNAVAILABLE');
+    this.name = 'AiServiceUnavailableError';
+  }
+}
+
 type ProductPayload = {
   name: string;
   quantity: number;
@@ -212,8 +233,24 @@ export async function generateAiRecipeSuggestions(items: InventoryItem[]): Promi
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI HTTP ${response.status}: ${text.slice(0, 500)}`);
+    let code = '';
+    try {
+      const payload = (await response.json()) as { error?: { code?: string; type?: string } };
+      code = payload.error?.code || payload.error?.type || '';
+    } catch {
+      // ignore JSON parse failures and classify by HTTP status below
+    }
+
+    if (response.status === 401 || code === 'invalid_api_key') {
+      throw new AiInvalidApiKeyError();
+    }
+    if (response.status === 429 || code === 'rate_limit_exceeded') {
+      throw new AiRateLimitedError();
+    }
+    if (response.status >= 500) {
+      throw new AiServiceUnavailableError();
+    }
+    throw new Error(`AI_UPSTREAM_HTTP_${response.status}`);
   }
 
   const data = (await response.json()) as {
