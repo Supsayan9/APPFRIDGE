@@ -3,9 +3,10 @@ import cors from 'cors';
 import express from 'express';
 import cron from 'node-cron';
 import { buildRecipeSuggestions, getInventoryInsight, type InventoryItem, type PushRegistration } from '@appfridge/shared';
-import { deleteInventoryItem, initDb, insertInventoryItem, listInventory, savePushToken } from './db.js';
+import { deleteInventoryItem, initDb, insertInventoryItem, listInventory, savePushToken, upsertProduct } from './db.js';
 import { AiNotConfiguredError, generateAiRecipeSuggestions } from './aiRecipes.js';
-import { lookupProduct } from './lookup.js';
+import { lookupProduct, normalizeBarcode } from './lookup.js';
+import { normalizeProductCategory } from './category.js';
 import { getUrgentInventory, sendReminderPushes } from './reminders.js';
 
 const app = express();
@@ -41,16 +42,43 @@ app.get('/inventory', (_req, res) => {
 
 app.post('/inventory', (req, res) => {
   const body = req.body as Omit<InventoryItem, 'id' | 'createdAt'>;
+  const barcode = normalizeBarcode(String(body.barcode ?? ''));
+  if (!barcode) {
+    res.status(400).json({ error: 'invalid_barcode', message: 'Потрібен непорожній штрихкод.' });
+    return;
+  }
+
+  const category = normalizeProductCategory({
+    name: body.name,
+    brand: body.brand,
+    category: body.category
+  });
+
   const item: InventoryItem = {
     ...body,
+    barcode,
+    category,
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString()
   };
 
-  insertInventoryItem(item);
+  const { note: _note, ...forInsert } = item;
+  insertInventoryItem(forInsert);
+
+  const noteTrim = typeof body.note === 'string' ? body.note.trim() : '';
+  upsertProduct({
+    barcode,
+    name: item.name.trim(),
+    brand: item.brand?.trim() || undefined,
+    category,
+    imageUrl: item.imageUrl,
+    note: noteTrim || undefined,
+    taughtByUser: true
+  });
+
   res.status(201).json({
-    ...item,
-    insight: getInventoryInsight(item)
+    ...forInsert,
+    insight: getInventoryInsight(forInsert)
   });
 });
 

@@ -26,6 +26,10 @@ export interface Product {
   brand?: string;
   category?: ProductCategory;
   imageUrl?: string;
+  /** Ваша примітка до штрихкоду (зберігається в локальному каталозі на сервері). */
+  note?: string;
+  /** true — назву/примітку за цим штрихкодом зберегли з холодильника; наступний скан підтягне їх з кешу. */
+  taughtByUser?: boolean;
   lookupStatus?: 'catalog' | 'fallback';
   lookupMessage?: string;
 }

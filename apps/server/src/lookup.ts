@@ -207,11 +207,16 @@ export async function lookupProduct(rawBarcode: string): Promise<Product> {
 
   const cachedRaw = findCachedProduct(rawBarcode);
   if (cachedRaw) {
+    const fromUser = Boolean(cachedRaw.taughtByUser);
     return {
       ...cachedRaw,
       barcode,
       category: normalizeProductCategory(cachedRaw),
-      lookupStatus: cachedRaw.lookupStatus || 'catalog'
+      lookupStatus: 'catalog',
+      lookupMessage: fromUser
+        ? 'Ваш запис за цим штрихкодом (збережено під час додавання в холодильник).'
+        : undefined,
+      taughtByUser: fromUser ? true : undefined
     };
   }
 
@@ -219,12 +224,32 @@ export async function lookupProduct(rawBarcode: string): Promise<Product> {
     for (const { base, label } of OPEN_FACTS_BASES) {
       const found = await fetchOffCatalogProduct(barcode, base, label);
       if (found) {
-        upsertProduct(found);
+        upsertProduct({
+          barcode: found.barcode,
+          name: found.name,
+          brand: found.brand,
+          category: found.category,
+          imageUrl: found.imageUrl,
+          taughtByUser: false,
+          note: undefined
+        });
         return found;
       }
     }
   } catch {
     // Мережева помилка — нижче локальний fallback.
+  }
+
+  const userRow = findProduct(barcode);
+  if (userRow?.taughtByUser) {
+    return {
+      ...userRow,
+      barcode,
+      category: normalizeProductCategory(userRow),
+      lookupStatus: 'catalog',
+      lookupMessage: 'Ваш запис за цим штрихкодом (збережено під час додавання в холодильник).',
+      taughtByUser: true
+    };
   }
 
   const fallback = fallbackProducts[barcode] || {
@@ -240,6 +265,14 @@ export async function lookupProduct(rawBarcode: string): Promise<Product> {
       'Не знайдено в Open Food / Beauty / Pet Facts. Спробуйте ввести назву вручну — частина локальних або нових кодів ще не в цих базах.'
   };
 
-  upsertProduct(fallback);
+  upsertProduct({
+    barcode: fallback.barcode,
+    name: fallback.name,
+    brand: fallback.brand,
+    category: fallback.category,
+    imageUrl: fallback.imageUrl,
+    taughtByUser: false,
+    note: undefined
+  });
   return fallback;
 }

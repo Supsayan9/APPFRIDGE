@@ -5,6 +5,17 @@ const databasePath = process.env.DATABASE_PATH || './appfridge.db';
 
 export const db = new Database(databasePath);
 
+function ensureProductExtraColumns() {
+  const cols = db.prepare(`PRAGMA table_info(products)`).all() as Array<{ name: string }>;
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has('taughtByUser')) {
+    db.exec(`ALTER TABLE products ADD COLUMN taughtByUser INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!names.has('note')) {
+    db.exec(`ALTER TABLE products ADD COLUMN note TEXT`);
+  }
+}
+
 export function initDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS products (
@@ -34,28 +45,59 @@ export function initDb() {
       createdAt TEXT NOT NULL
     );
   `);
+  ensureProductExtraColumns();
 }
 
 export function upsertProduct(product: Product) {
+  const taught = product.taughtByUser === true ? 1 : 0;
+
   db.prepare(`
-    INSERT INTO products (barcode, name, brand, category, imageUrl)
-    VALUES (@barcode, @name, @brand, @category, @imageUrl)
+    INSERT INTO products (barcode, name, brand, category, imageUrl, taughtByUser, note)
+    VALUES (@barcode, @name, @brand, @category, @imageUrl, @taughtByUser, @note)
     ON CONFLICT(barcode) DO UPDATE SET
       name = excluded.name,
       brand = excluded.brand,
       category = excluded.category,
-      imageUrl = excluded.imageUrl
+      imageUrl = excluded.imageUrl,
+      taughtByUser = excluded.taughtByUser,
+      note = excluded.note
   `).run({
     barcode: product.barcode,
     name: product.name,
     brand: product.brand ?? null,
     category: product.category ?? null,
-    imageUrl: product.imageUrl ?? null
+    imageUrl: product.imageUrl ?? null,
+    taughtByUser: taught,
+    note: product.note?.trim() || null
   });
 }
 
 export function findProduct(barcode: string): Product | undefined {
-  return db.prepare(`SELECT barcode, name, brand, category, imageUrl FROM products WHERE barcode = ?`).get(barcode) as Product | undefined;
+  const row = db
+    .prepare(`SELECT barcode, name, brand, category, imageUrl, taughtByUser, note FROM products WHERE barcode = ?`)
+    .get(barcode) as
+    | {
+        barcode: string;
+        name: string;
+        brand: string | null;
+        category: string | null;
+        imageUrl: string | null;
+        taughtByUser: number | null;
+        note: string | null;
+      }
+    | undefined;
+  if (!row) {
+    return undefined;
+  }
+  return {
+    barcode: row.barcode,
+    name: row.name,
+    brand: row.brand ?? undefined,
+    category: (row.category as Product['category']) ?? undefined,
+    imageUrl: row.imageUrl ?? undefined,
+    taughtByUser: Boolean(row.taughtByUser),
+    note: row.note?.trim() || undefined
+  };
 }
 
 export function listInventory(): InventoryItem[] {

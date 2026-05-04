@@ -15,6 +15,7 @@ export default function App() {
   const [inventory, setInventory] = useState<InventoryResponseItem[]>([]);
   const [barcode, setBarcode] = useState('');
   const [productName, setProductName] = useState('');
+  const [productNote, setProductNote] = useState('');
   const [expirationDate, setExpirationDate] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [location, setLocation] = useState<LocationType>('fridge');
@@ -70,6 +71,7 @@ export default function App() {
         return;
       }
       setProductName(product.name);
+      setProductNote(product.note?.trim() ? product.note : '');
       if (product.lookupStatus === 'fallback') {
         Alert.alert(
           'Товар не знайдено в каталозі',
@@ -81,6 +83,7 @@ export default function App() {
         return;
       }
       setProductName(`Товар ${code}`);
+      setProductNote('');
       Alert.alert(
         'Не вдалося отримати товар',
         'Або бекенд недоступний, або сталася мережева помилка. Ви можете вписати назву вручну і все одно зберегти продукт.'
@@ -121,12 +124,14 @@ export default function App() {
         name: productName,
         expirationDate: normalizedExpirationDate,
         quantity: Math.max(1, Number(quantity) || 1),
-        location
+        location,
+        ...(productNote.trim() ? { note: productNote.trim() } : {})
       });
 
       setInventory((current) => [created, ...current]);
       setBarcode('');
       setProductName('');
+      setProductNote('');
       setExpirationDate('');
       setQuantity('1');
       setLocation('fridge');
@@ -202,7 +207,9 @@ export default function App() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Додати продукт</Text>
-          <Text style={styles.sectionText}>Скануйте штрихкод, підтягніть товар, а потім вкажіть дату закінчення.</Text>
+          <Text style={styles.sectionText}>
+            Скануйте штрихкод або введіть його вручну. Якщо товару немає в онлайн-базі — вкажіть назву (і за бажанням примітку) і збережіть: наступного разу цей штрихкод підтягнеться з вашого локального каталогу на сервері.
+          </Text>
 
           <Pressable style={styles.button} onPress={requestScanner}>
             <Text style={styles.buttonText}>Відкрити сканер</Text>
@@ -235,6 +242,13 @@ export default function App() {
             <Text style={styles.buttonTextLight}>{loading ? 'Пошук...' : 'Знайти товар'}</Text>
           </Pressable>
           <TextInput style={styles.input} placeholder="Назва товару" placeholderTextColor="#7f95a3" value={productName} onChangeText={setProductName} />
+          <TextInput
+            style={styles.input}
+            placeholder="Примітка до штрихкоду (необов'язково, збережеться для наступних сканів)"
+            placeholderTextColor="#7f95a3"
+            value={productNote}
+            onChangeText={setProductNote}
+          />
           <TextInput style={styles.input} placeholder="Дата придатності YYYY-MM-DD або DD.MM.YYYY" placeholderTextColor="#7f95a3" value={expirationDate} onChangeText={setExpirationDate} />
           <TextInput style={styles.input} placeholder="Кількість" placeholderTextColor="#7f95a3" value={quantity} onChangeText={setQuantity} keyboardType="numeric" />
           <TextInput style={styles.input} placeholder="Місце: fridge/freezer/pantry" placeholderTextColor="#7f95a3" value={location} onChangeText={(value) => setLocation((value as LocationType) || 'fridge')} />
