@@ -57,6 +57,19 @@ const fallbackProducts: Record<string, Product> = {
   }
 };
 
+function isGenericFallbackName(name: string, barcode: string): boolean {
+  return name.trim().toLowerCase() === `товар ${barcode}`.toLowerCase();
+}
+
+function isWeakAutoFallbackProduct(product: Product): boolean {
+  if (product.taughtByUser) {
+    return false;
+  }
+  const noBrand = !product.brand?.trim();
+  const genericCategory = !product.category || product.category === 'Інше';
+  return noBrand && genericCategory && isGenericFallbackName(product.name, product.barcode);
+}
+
 /** Цифри лише; UPC-A (12) → EAN-13 з ведучим 0. */
 export function normalizeBarcode(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -206,7 +219,7 @@ export async function lookupProduct(rawBarcode: string): Promise<Product> {
   }
 
   const cachedRaw = findCachedProduct(rawBarcode);
-  if (cachedRaw) {
+  if (cachedRaw && !isWeakAutoFallbackProduct(cachedRaw)) {
     const fromUser = Boolean(cachedRaw.taughtByUser);
     return {
       ...cachedRaw,
@@ -265,14 +278,17 @@ export async function lookupProduct(rawBarcode: string): Promise<Product> {
       'Не знайдено в Open Food / Beauty / Pet Facts. Спробуйте ввести назву вручну — частина локальних або нових кодів ще не в цих базах.'
   };
 
-  upsertProduct({
-    barcode: fallback.barcode,
-    name: fallback.name,
-    brand: fallback.brand,
-    category: fallback.category,
-    imageUrl: fallback.imageUrl,
-    taughtByUser: false,
-    note: undefined
-  });
+  // Не кешуємо "сирий" fallback виду "Товар <barcode>", щоб він не блокував наступні нормальні lookup.
+  if (fallbackProducts[barcode]) {
+    upsertProduct({
+      barcode: fallback.barcode,
+      name: fallback.name,
+      brand: fallback.brand,
+      category: fallback.category,
+      imageUrl: fallback.imageUrl,
+      taughtByUser: false,
+      note: undefined
+    });
+  }
   return fallback;
 }

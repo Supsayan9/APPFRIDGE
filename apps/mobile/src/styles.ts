@@ -3,7 +3,36 @@ import { StyleSheet } from 'react-native';
 export const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#09111f'
+    backgroundColor: '#160f2b'
+  },
+  kuromiBackdropImage: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.28
+  },
+  kuromiBackdropOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(20, 10, 44, 0.74)'
+  },
+  kuromiDecorWrap: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'space-between',
+    paddingTop: 14,
+    paddingBottom: 28,
+    paddingHorizontal: 18
+  },
+  kuromiDecorTop: {
+    alignSelf: 'flex-end',
+    color: '#f5d0fe',
+    fontSize: 22,
+    opacity: 0.42
+  },
+  kuromiDecorBottom: {
+    alignSelf: 'flex-start',
+    color: '#d8b4fe',
+    fontSize: 12,
+    letterSpacing: 3,
+    opacity: 0.4,
+    fontWeight: '800'
   },
   content: {
     paddingHorizontal: 18,
@@ -11,17 +40,32 @@ export const styles = StyleSheet.create({
     paddingBottom: 42
   },
   hero: {
-    backgroundColor: '#10283f',
+    backgroundColor: '#2b1f4a',
     borderRadius: 24,
     padding: 22,
     marginBottom: 18
   },
+  heroHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12
+  },
+  heroHeaderTexts: {
+    flex: 1
+  },
+  heroBadgeImage: {
+    width: 58,
+    height: 58,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: 'rgba(240, 171, 252, 0.7)'
+  },
   eyebrow: {
-    color: '#ffbf69',
+    color: '#d8b4fe',
     fontSize: 12,
     letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 8
+    marginBottom: 6
   },
   title: {
     color: '#f2f8ff',
@@ -30,7 +74,7 @@ export const styles = StyleSheet.create({
     marginBottom: 8
   },
   subtitle: {
-    color: '#b8cad7',
+    color: '#d1c4e9',
     fontSize: 15,
     lineHeight: 22
   },
@@ -41,12 +85,12 @@ export const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#173550',
+    backgroundColor: '#3d2d67',
     borderRadius: 18,
     padding: 14
   },
   statLabel: {
-    color: '#9eb2be',
+    color: '#c4b5fd',
     fontSize: 12,
     marginBottom: 6
   },
@@ -56,7 +100,7 @@ export const styles = StyleSheet.create({
     fontWeight: '800'
   },
   section: {
-    backgroundColor: '#0f1d30',
+    backgroundColor: '#24173f',
     borderRadius: 22,
     padding: 18,
     marginBottom: 16
@@ -68,22 +112,214 @@ export const styles = StyleSheet.create({
     marginBottom: 6
   },
   sectionText: {
-    color: '#9eb2be',
+    color: '#cbbbe7',
     fontSize: 14,
     marginBottom: 14
   },
+  dateHint: {
+    color: '#d8cdf0',
+    fontSize: 12,
+    marginTop: 2,
+    marginBottom: 8
+  },
+  scanSummaryCard: {
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: '#332252',
+    borderWidth: 1,
+    borderColor: '#5b3a8a',
+    marginBottom: 10
+  },
+  scanSummaryLabel: {
+    color: '#f5d0fe',
+    fontSize: 12,
+    marginBottom: 4,
+    fontWeight: '800'
+  },
+  scanSummaryValue: {
+    color: '#d8cdf0',
+    fontSize: 12,
+    marginTop: 2
+  },
+  expiryRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center'
+  },
+  expiryInput: {
+    flex: 1
+  },
+  expiryInputYear: {
+    flex: 1.4
+  },
+  qtyWheelWrap: {
+    height: 150,
+    borderRadius: 14,
+    backgroundColor: '#201436',
+    borderWidth: 1,
+    borderColor: '#5b3a8a',
+    marginBottom: 12,
+    overflow: 'hidden'
+  },
+  qtyWheelScroll: {
+    flex: 1
+  },
+  qtyWheelContent: {
+    paddingVertical: 53
+  },
+  qtyWheelCenterBand: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 53,
+    height: 44,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#a855f7',
+    backgroundColor: 'rgba(168, 85, 247, 0.14)',
+    zIndex: 2
+  },
+  qtyWheelItem: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  qtyWheelText: {
+    color: '#bfa9de',
+    fontSize: 20,
+    fontWeight: '600'
+  },
+  qtyWheelTextActive: {
+    color: '#f5ecff',
+    fontSize: 24,
+    fontWeight: '800'
+  },
+  inventoryGroupHeader: {
+    marginTop: 6,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  inventoryGroupPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5
+  },
+  inventoryGroupPillFridge: {
+    backgroundColor: '#4c2c78'
+  },
+  inventoryGroupPillFreezer: {
+    backgroundColor: '#3748a8'
+  },
+  inventoryGroupPillText: {
+    color: '#f3ebff',
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  inventoryGroupCount: {
+    color: '#d9c7fb',
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  inventoryGroupEmpty: {
+    color: '#b9a7da',
+    marginTop: 6
+  },
+  inventoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between'
+  },
+  inventoryTile: {
+    width: '48.5%',
+    minHeight: 132,
+    backgroundColor: '#332252',
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 10
+  },
+  inventoryTileTop: {
+    flexGrow: 1
+  },
+  inventoryTileIcon: {
+    fontSize: 20,
+    marginBottom: 4
+  },
+  inventoryTileTitle: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4
+  },
+  inventoryTileMeta: {
+    color: '#d8cdf0',
+    fontSize: 12,
+    marginTop: 2
+  },
+  inventoryTileStatus: {
+    color: '#f0abfc',
+    fontSize: 12,
+    marginTop: 8,
+    fontWeight: '700'
+  },
+  inventoryDragHint: {
+    color: '#bca9df',
+    fontSize: 10,
+    marginTop: 6
+  },
+  inventoryTileAiTag: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    backgroundColor: '#5b3a8a',
+    color: '#f3e8ff',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    overflow: 'hidden',
+    fontSize: 11,
+    fontWeight: '800'
+  },
+  inventoryTileAiButton: {
+    marginTop: 10,
+    borderRadius: 10,
+    backgroundColor: '#4c2c78',
+    alignItems: 'center',
+    paddingVertical: 8
+  },
+  inventoryTileAiButtonActive: {
+    backgroundColor: '#7e22ce'
+  },
+  inventoryTileAiButtonText: {
+    color: '#f7edff',
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  aiNotice: {
+    color: '#d4c6f2',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 2
+  },
+  aiNoticeError: {
+    color: '#ffb3b3'
+  },
+  aiNoticeOk: {
+    color: '#a7f3d0'
+  },
   button: {
-    backgroundColor: '#ffb84d',
+    backgroundColor: '#a855f7',
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 10
   },
   buttonSecondary: {
-    backgroundColor: '#1d334b'
+    backgroundColor: '#4c2c78'
   },
   buttonText: {
-    color: '#1d160c',
+    color: '#f5ecff',
     fontWeight: '800'
   },
   buttonTextLight: {
@@ -91,15 +327,36 @@ export const styles = StyleSheet.create({
     fontWeight: '700'
   },
   input: {
-    backgroundColor: '#12263d',
+    backgroundColor: '#342055',
     color: '#ffffff',
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 10
   },
+  locationRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10
+  },
+  locationOption: {
+    flex: 1,
+    backgroundColor: '#3a235c',
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 10,
+    alignItems: 'center'
+  },
+  locationOptionActive: {
+    backgroundColor: '#7e22ce'
+  },
+  locationOptionText: {
+    color: '#f2eaff',
+    fontSize: 13,
+    fontWeight: '700'
+  },
   card: {
-    backgroundColor: '#12263d',
+    backgroundColor: '#332252',
     borderRadius: 18,
     padding: 14,
     marginTop: 10
@@ -112,25 +369,63 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ffd166'
   },
+  cardFresh: {
+    borderWidth: 1,
+    borderColor: '#4ade80'
+  },
   cardTitle: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700'
   },
   cardMeta: {
-    color: '#9eb2be',
+    color: '#d1c4e9',
     fontSize: 13,
     marginTop: 4
   },
   status: {
-    color: '#ffd166',
+    color: '#f0abfc',
     marginTop: 8,
     fontWeight: '700'
   },
+  aiPickButton: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    backgroundColor: '#4c2c78',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  aiPickButtonActive: {
+    backgroundColor: '#7e22ce'
+  },
+  aiPickText: {
+    color: '#efe3ff',
+    fontSize: 12,
+    fontWeight: '700'
+  },
   removeText: {
-    color: '#ff9f9f',
+    color: '#fda4af',
     fontWeight: '700',
     marginTop: 10
+  },
+  aiSelectionText: {
+    color: '#d9c7fb',
+    fontSize: 13,
+    marginBottom: 8
+  },
+  aiClearButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: '#3f2a63',
+    marginBottom: 10
+  },
+  aiClearButtonText: {
+    color: '#f1e8ff',
+    fontSize: 12,
+    fontWeight: '700'
   },
   scannerBox: {
     overflow: 'hidden',
@@ -139,7 +434,7 @@ export const styles = StyleSheet.create({
     marginBottom: 12
   },
   scannerHint: {
-    color: '#c9d6df',
+    color: '#ddd6fe',
     textAlign: 'center',
     marginTop: 8
   },
@@ -150,14 +445,14 @@ export const styles = StyleSheet.create({
     marginBottom: 6
   },
   recipeBody: {
-    color: '#bfd0db',
+    color: '#ded1f2',
     fontSize: 14,
     lineHeight: 20
   },
   recipeBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#2a4a6f',
-    color: '#7dd3fc',
+    backgroundColor: '#5b3a8a',
+    color: '#e9d5ff',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.6,
@@ -168,9 +463,53 @@ export const styles = StyleSheet.create({
     overflow: 'hidden'
   },
   recipeSteps: {
-    color: '#d5e4ef',
+    color: '#e7ddf7',
     fontSize: 13,
     lineHeight: 20,
     marginTop: 6
+  },
+  detailOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(7, 4, 16, 0.75)',
+    justifyContent: 'center',
+    paddingHorizontal: 18
+  },
+  detailCard: {
+    backgroundColor: '#2d1b4d',
+    borderRadius: 18,
+    padding: 16
+  },
+  detailTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 8
+  },
+  detailLine: {
+    color: '#dcd0f3',
+    fontSize: 14,
+    marginTop: 5
+  },
+  detailAction: {
+    marginTop: 12,
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: 'center',
+    backgroundColor: '#4c2c78'
+  },
+  detailDeleteAction: {
+    backgroundColor: '#7d2f52'
+  },
+  detailActionText: {
+    color: '#f7eeff',
+    fontWeight: '700'
+  },
+  detailCloseButton: {
+    marginTop: 12,
+    alignItems: 'center'
+  },
+  detailCloseText: {
+    color: '#d8c8f4',
+    fontWeight: '700'
   }
 });

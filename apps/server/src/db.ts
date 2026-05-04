@@ -130,6 +130,61 @@ export function insertInventoryItem(item: InventoryItem) {
   });
 }
 
+export function findInventoryDuplicate(params: {
+  barcode: string;
+  expirationDate: string;
+  location: InventoryItem['location'];
+}): InventoryItem | undefined {
+  return db
+    .prepare(
+      `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, quantity, location, createdAt
+       FROM inventory_items
+       WHERE barcode = @barcode AND expirationDate = @expirationDate AND location = @location
+       ORDER BY createdAt DESC
+       LIMIT 1`
+    )
+    .get({
+      barcode: params.barcode,
+      expirationDate: params.expirationDate,
+      location: params.location
+    }) as InventoryItem | undefined;
+}
+
+export function findInventoryItemById(id: string): InventoryItem | undefined {
+  return db
+    .prepare(
+      `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, quantity, location, createdAt
+       FROM inventory_items
+       WHERE id = ?`
+    )
+    .get(id) as InventoryItem | undefined;
+}
+
+export function updateInventoryItem(
+  id: string,
+  patch: Partial<Pick<InventoryItem, 'quantity' | 'location'>>
+): InventoryItem | undefined {
+  const current = findInventoryItemById(id);
+  if (!current) {
+    return undefined;
+  }
+
+  const quantity = typeof patch.quantity === 'number' ? Math.max(1, Math.round(patch.quantity)) : current.quantity;
+  const location = patch.location ?? current.location;
+
+  db.prepare(
+    `UPDATE inventory_items
+     SET quantity = @quantity, location = @location
+     WHERE id = @id`
+  ).run({
+    id,
+    quantity,
+    location
+  });
+
+  return findInventoryItemById(id);
+}
+
 export function deleteInventoryItem(id: string) {
   db.prepare(`DELETE FROM inventory_items WHERE id = ?`).run(id);
 }

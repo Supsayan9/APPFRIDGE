@@ -64,6 +64,12 @@ CLIENT_ORIGIN=*
 DATABASE_PATH=./appfridge.db
 EXPO_ACCESS_TOKEN=
 PEXELS_KEY=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+# Опционально для OpenAI-compatible провайдера:
+# OPENAI_BASE_URL=https://api.apifree.ai
+# OPENAI_BASE_URL=https://openrouter.ai/api
+# OPENAI_TIMEOUT_MS=25000
 ```
 
 ### 3. Запустить backend

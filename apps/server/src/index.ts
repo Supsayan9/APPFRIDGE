@@ -3,13 +3,15 @@ import cors from 'cors';
 import express from 'express';
 import cron from 'node-cron';
 import { buildRecipeSuggestions, getInventoryInsight, type InventoryItem, type PushRegistration } from '@appfridge/shared';
-import { deleteInventoryItem, initDb, insertInventoryItem, listInventory, savePushToken, upsertProduct } from './db.js';
+import { deleteInventoryItem, findInventoryDuplicate, initDb, insertInventoryItem, listInventory, savePushToken, updateInventoryItem, upsertProduct } from './db.js';
 import {
   AiInvalidApiKeyError,
   AiNotConfiguredError,
   AiRateLimitedError,
   AiServiceUnavailableError,
-  generateAiRecipeSuggestions
+  generateAiRecipeSuggestions,
+  parseProductNameFromImage,
+  parseExpiryDateFromImage
 } from './aiRecipes.js';
 import { lookupProduct, normalizeBarcode } from './lookup.js';
 import { normalizeProductCategory } from './category.js';
@@ -25,7 +27,7 @@ app.use(
     origin: process.env.CLIENT_ORIGIN || '*'
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, date: new Date().toISOString() });
@@ -53,6 +55,21 @@ app.post('/inventory', (req, res) => {
     res.status(400).json({ error: 'invalid_barcode', message: 'Потрібен непорожній штрихкод.' });
     return;
   }
+  const quantityRaw = Number(body.quantity);
+  if (!Number.isFinite(quantityRaw) || quantityRaw <= 0) {
+    res.status(400).json({ error: 'invalid_quantity', message: 'Кількість має бути числом більше 0.' });
+    return;
+  }
+  const quantity = Math.max(1, Math.round(quantityRaw));
+  if (body.location !== 'fridge' && body.location !== 'freezer' && body.location !== 'pantry') {
+    res.status(400).json({ error: 'invalid_location', message: 'Location має бути fridge/freezer/pantry.' });
+    return;
+  }
+  const normalizedDate = String(body.expirationDate ?? '').trim();
+  if (!normalizedDate) {
+    res.status(400).json({ error: 'invalid_expiration_date', message: 'Потрібна дата придатності.' });
+    return;
+  }
 
   const category = normalizeProductCategory({
     name: body.name,
@@ -60,8 +77,40 @@ app.post('/inventory', (req, res) => {
     category: body.category
   });
 
+  const duplicate = findInventoryDuplicate({
+    barcode,
+    expirationDate: normalizedDate,
+    location: body.location
+  });
+  if (duplicate) {
+    const merged = updateInventoryItem(duplicate.id, { quantity: duplicate.quantity + quantity });
+    if (!merged) {
+      res.status(500).json({ error: 'merge_failed', message: 'Не вдалося обʼєднати дублікати товару.' });
+      return;
+    }
+
+    const noteTrim = typeof body.note === 'string' ? body.note.trim() : '';
+    upsertProduct({
+      barcode,
+      name: body.name.trim(),
+      brand: body.brand?.trim() || undefined,
+      category,
+      imageUrl: body.imageUrl,
+      note: noteTrim || undefined,
+      taughtByUser: true
+    });
+
+    res.status(200).json({
+      ...merged,
+      insight: getInventoryInsight(merged)
+    });
+    return;
+  }
+
   const item: InventoryItem = {
     ...body,
+    quantity,
+    expirationDate: normalizedDate,
     barcode,
     category,
     id: crypto.randomUUID(),
@@ -93,13 +142,72 @@ app.delete('/inventory/:id', (req, res) => {
   res.status(204).send();
 });
 
+app.patch('/inventory/:id', (req, res) => {
+  const body = req.body as { quantity?: unknown; location?: unknown };
+  const patch: Partial<Pick<InventoryItem, 'quantity' | 'location'>> = {};
+
+  if (typeof body.quantity !== 'undefined') {
+    const q = Number(body.quantity);
+    if (!Number.isFinite(q) || q <= 0) {
+      res.status(400).json({ error: 'invalid_quantity', message: 'Кількість має бути числом більше 0.' });
+      return;
+    }
+    patch.quantity = Math.max(1, Math.round(q));
+  }
+
+  if (typeof body.location !== 'undefined') {
+    if (body.location !== 'fridge' && body.location !== 'freezer' && body.location !== 'pantry') {
+      res.status(400).json({ error: 'invalid_location', message: 'Location має бути fridge/freezer/pantry.' });
+      return;
+    }
+    patch.location = body.location;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    res.status(400).json({ error: 'empty_patch', message: 'Передайте хоча б quantity або location.' });
+    return;
+  }
+
+  const updated = updateInventoryItem(req.params.id, patch);
+  if (!updated) {
+    res.status(404).json({ error: 'not_found', message: 'Продукт не знайдено.' });
+    return;
+  }
+
+  res.json({
+    ...updated,
+    insight: getInventoryInsight(updated)
+  });
+});
+
 app.get('/recipes', (_req, res) => {
   res.json(buildRecipeSuggestions(listInventory()));
 });
 
-app.get('/recipes/ai', async (_req, res) => {
+function resolveAiItems(itemIds: unknown): InventoryItem[] {
+  const all = listInventory();
+  if (!Array.isArray(itemIds) || itemIds.length === 0) {
+    return all;
+  }
+
+  const ids = new Set(
+    itemIds
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+
+  if (ids.size === 0) {
+    return all;
+  }
+
+  const selected = all.filter((item) => ids.has(item.id));
+  return selected.length > 0 ? selected : all;
+}
+
+async function handleAiRecipesRequest(items: InventoryItem[], res: express.Response) {
   try {
-    const recipes = await generateAiRecipeSuggestions(listInventory());
+    const recipes = await generateAiRecipeSuggestions(items);
     res.json(recipes);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -107,7 +215,7 @@ app.get('/recipes/ai', async (_req, res) => {
       res.status(503).json({
         error: 'ai_unconfigured',
         message:
-          'Додайте ключ OpenAI-формату (sk-...) у .env сервера: OPENAI_API_KEY, AI_API_KEY або APIFREE_KEY. PEXELS_KEY — лише фото, для рецептів не підходить.'
+          'Додайте ключ OpenAI-формату (sk-...) у .env сервера: OPENAI_API_KEY, AI_API_KEY або APIFREE_KEY. Для сумісного провайдера можна додати OPENAI_BASE_URL. PEXELS_KEY — лише фото, для рецептів не підходить.'
       });
       return;
     }
@@ -135,6 +243,129 @@ app.get('/recipes/ai', async (_req, res) => {
     res.status(502).json({
       error: 'ai_failed',
       message: 'Не вдалося згенерувати AI-рецепти. Перевірте налаштування ключа та спробуйте ще раз.'
+    });
+  }
+}
+
+app.get('/recipes/ai', async (_req, res) => {
+  await handleAiRecipesRequest(listInventory(), res);
+});
+
+app.post('/recipes/ai', async (req, res) => {
+  const itemIds = (req.body as { itemIds?: unknown } | undefined)?.itemIds;
+  await handleAiRecipesRequest(resolveAiItems(itemIds), res);
+});
+
+app.post('/ai/expiry-from-image', async (req, res) => {
+  const body = req.body as { imageBase64?: unknown; mimeType?: unknown };
+  const base64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
+  const mimeType = typeof body.mimeType === 'string' && body.mimeType.trim() ? body.mimeType.trim() : 'image/jpeg';
+
+  if (!base64) {
+    res.status(400).json({ error: 'invalid_image', message: 'Порожнє зображення. Зробіть фото ще раз.' });
+    return;
+  }
+
+  try {
+    const parsed = await parseExpiryDateFromImage(`data:${mimeType};base64,${base64}`);
+    res.json(parsed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof AiNotConfiguredError || message === 'AI_API_KEY_NOT_CONFIGURED') {
+      res.status(503).json({
+        error: 'ai_unconfigured',
+        message: 'AI не налаштовано: додайте OPENAI_API_KEY / AI_API_KEY / APIFREE_KEY у apps/server/.env.'
+      });
+      return;
+    }
+    if (error instanceof AiInvalidApiKeyError || message === 'AI_INVALID_API_KEY') {
+      res.status(503).json({
+        error: 'ai_invalid_key',
+        message: 'AI ключ недійсний. Оновіть OPENAI_API_KEY / AI_API_KEY / APIFREE_KEY у apps/server/.env.'
+      });
+      return;
+    }
+    if (error instanceof AiRateLimitedError || message === 'AI_RATE_LIMITED') {
+      res.status(429).json({
+        error: 'ai_rate_limited',
+        message: 'Ліміт запитів AI перевищено. Спробуйте пізніше.'
+      });
+      return;
+    }
+    if (error instanceof AiServiceUnavailableError || message === 'AI_SERVICE_UNAVAILABLE') {
+      res.status(503).json({
+        error: 'ai_service_unavailable',
+        message: 'AI сервіс тимчасово недоступний. Спробуйте пізніше.'
+      });
+      return;
+    }
+    if (message === 'EXPIRY_DATE_NOT_FOUND') {
+      res.status(422).json({
+        error: 'expiry_not_found',
+        message: 'Не вдалося розпізнати дату придатності на фото. Спробуйте ближче/чіткіше фото.'
+      });
+      return;
+    }
+    res.status(502).json({
+      error: 'ai_failed',
+      message: 'Не вдалося розпізнати дату з фото.'
+    });
+  }
+});
+
+app.post('/ai/name-from-image', async (req, res) => {
+  const body = req.body as { imageBase64?: unknown; mimeType?: unknown };
+  const base64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
+  const mimeType = typeof body.mimeType === 'string' && body.mimeType.trim() ? body.mimeType.trim() : 'image/jpeg';
+
+  if (!base64) {
+    res.status(400).json({ error: 'invalid_image', message: 'Порожнє зображення. Зробіть фото ще раз.' });
+    return;
+  }
+
+  try {
+    const parsed = await parseProductNameFromImage(`data:${mimeType};base64,${base64}`);
+    res.json(parsed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof AiNotConfiguredError || message === 'AI_API_KEY_NOT_CONFIGURED') {
+      res.status(503).json({
+        error: 'ai_unconfigured',
+        message: 'AI не налаштовано: додайте OPENAI_API_KEY / AI_API_KEY / APIFREE_KEY у apps/server/.env.'
+      });
+      return;
+    }
+    if (error instanceof AiInvalidApiKeyError || message === 'AI_INVALID_API_KEY') {
+      res.status(503).json({
+        error: 'ai_invalid_key',
+        message: 'AI ключ недійсний. Оновіть OPENAI_API_KEY / AI_API_KEY / APIFREE_KEY у apps/server/.env.'
+      });
+      return;
+    }
+    if (error instanceof AiRateLimitedError || message === 'AI_RATE_LIMITED') {
+      res.status(429).json({
+        error: 'ai_rate_limited',
+        message: 'Ліміт запитів AI перевищено. Спробуйте пізніше.'
+      });
+      return;
+    }
+    if (error instanceof AiServiceUnavailableError || message === 'AI_SERVICE_UNAVAILABLE') {
+      res.status(503).json({
+        error: 'ai_service_unavailable',
+        message: 'AI сервіс тимчасово недоступний. Спробуйте пізніше.'
+      });
+      return;
+    }
+    if (message === 'PRODUCT_NAME_NOT_FOUND') {
+      res.status(422).json({
+        error: 'product_name_not_found',
+        message: 'Не вдалося розпізнати назву на фото. Спробуйте ближче або введіть вручну.'
+      });
+      return;
+    }
+    res.status(502).json({
+      error: 'ai_failed',
+      message: 'Не вдалося розпізнати назву з фото.'
     });
   }
 });
