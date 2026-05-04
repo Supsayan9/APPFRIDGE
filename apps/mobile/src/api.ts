@@ -38,7 +38,8 @@ export function removeInventoryItem(id: string) {
 }
 
 export function lookupProduct(barcode: string) {
-  return request<ProductLookupResponse>(`/products/${barcode}`);
+  const path = `/products/${encodeURIComponent(barcode)}`;
+  return request<ProductLookupResponse>(path);
 }
 
 export function fetchRecipes() {

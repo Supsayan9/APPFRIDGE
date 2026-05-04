@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, SafeAreaView, ScrollView, Text, TextInput, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { StatusBar } from 'expo-status-bar';
@@ -23,6 +23,10 @@ export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [aiRecipes, setAiRecipes] = useState<RecipeSuggestion[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  /** Ігноруємо відповіді застарілих паралельних lookup (подвійний скан / «Знайти» під час запиту). */
+  const lookupGenerationRef = useRef(0);
+  /** Один акт прийняття з камери: до відкриття сканера знову — блокуємо повторні onBarcodeScanned у тому ж кадрі. */
+  const scanConsumedRef = useRef(false);
 
   useEffect(() => {
     loadInventory();
@@ -56,11 +60,15 @@ export default function App() {
       return;
     }
 
+    const generation = ++lookupGenerationRef.current;
     setLoading(true);
     setBarcode(code);
 
     try {
       const product = await lookupProduct(code);
+      if (generation !== lookupGenerationRef.current) {
+        return;
+      }
       setProductName(product.name);
       if (product.lookupStatus === 'fallback') {
         Alert.alert(
@@ -69,17 +77,23 @@ export default function App() {
         );
       }
     } catch {
+      if (generation !== lookupGenerationRef.current) {
+        return;
+      }
       setProductName(`Товар ${code}`);
       Alert.alert(
         'Не вдалося отримати товар',
         'Або бекенд недоступний, або сталася мережева помилка. Ви можете вписати назву вручну і все одно зберегти продукт.'
       );
     } finally {
-      setLoading(false);
+      if (generation === lookupGenerationRef.current) {
+        setLoading(false);
+      }
     }
   }
 
   async function requestScanner() {
+    scanConsumedRef.current = false;
     if (!permission?.granted) {
       const result = await requestPermission();
       setScanning(result.granted);
@@ -201,8 +215,13 @@ export default function App() {
                   barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'qr']
                 }}
                 onBarcodeScanned={({ data }) => {
+                  const raw = typeof data === 'string' ? data.trim() : '';
+                  if (!raw || scanConsumedRef.current) {
+                    return;
+                  }
+                  scanConsumedRef.current = true;
                   setScanning(false);
-                  void handleLookup(data);
+                  void handleLookup(raw);
                 }}
                 style={{ flex: 1 }}
               />
