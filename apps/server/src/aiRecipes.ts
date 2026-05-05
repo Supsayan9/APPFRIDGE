@@ -94,7 +94,7 @@ function toPayload(item: InventoryItem): ProductPayload {
     quantity: item.quantity,
     location: item.location,
     category: item.category ?? null,
-    expirationDate: item.expirationDate,
+    expirationDate: item.location === 'freezer' ? item.originalExpirationDate ?? item.expirationDate : item.expirationDate,
     daysLeft: aiInsight.daysLeft,
     status: aiInsight.status
   };

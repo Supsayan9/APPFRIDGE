@@ -122,25 +122,6 @@ export const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: 8
   },
-  scanSummaryCard: {
-    borderRadius: 12,
-    padding: 10,
-    backgroundColor: '#332252',
-    borderWidth: 1,
-    borderColor: '#5b3a8a',
-    marginBottom: 10
-  },
-  scanSummaryLabel: {
-    color: '#f5d0fe',
-    fontSize: 12,
-    marginBottom: 4,
-    fontWeight: '800'
-  },
-  scanSummaryValue: {
-    color: '#d8cdf0',
-    fontSize: 12,
-    marginTop: 2
-  },
   expiryRow: {
     flexDirection: 'row',
     gap: 8,
@@ -241,10 +222,6 @@ export const styles = StyleSheet.create({
   },
   inventoryTileTop: {
     flexGrow: 1
-  },
-  inventoryTileIcon: {
-    fontSize: 20,
-    marginBottom: 4
   },
   inventoryTileTitle: {
     color: '#ffffff',
@@ -354,6 +331,25 @@ export const styles = StyleSheet.create({
     color: '#f2eaff',
     fontSize: 13,
     fontWeight: '700'
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  settingTextWrap: {
+    flex: 1
+  },
+  settingTitle: {
+    color: '#f4ecff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4
+  },
+  settingHint: {
+    color: '#d8cdf0',
+    fontSize: 13
   },
   card: {
     backgroundColor: '#332252',
@@ -511,5 +507,139 @@ export const styles = StyleSheet.create({
   detailCloseText: {
     color: '#d8c8f4',
     fontWeight: '700'
+  },
+  processingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 8, 22, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 26
+  },
+  processingInlineWrap: {
+    marginTop: 8,
+    marginBottom: 4
+  },
+  processingInlineOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 8, 22, 0.82)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    zIndex: 20
+  },
+  processingCard: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: 22,
+    backgroundColor: '#22143d',
+    borderWidth: 1,
+    borderColor: '#7e22ce',
+    padding: 20,
+    alignItems: 'center'
+  },
+  processingFridge: {
+    width: 84,
+    height: 118,
+    borderRadius: 16,
+    backgroundColor: '#9ec6ff',
+    borderWidth: 2,
+    borderColor: '#dbeafe',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+    overflow: 'hidden'
+  },
+  processingFridgeGlow: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(191, 219, 254, 0.45)'
+  },
+  processingShelfTop: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    top: 28,
+    height: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(96, 165, 250, 0.75)',
+    justifyContent: 'center'
+  },
+  processingShelfBottom: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 26,
+    height: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(96, 165, 250, 0.75)',
+    justifyContent: 'center'
+  },
+  processingFoodDotA: {
+    position: 'absolute',
+    left: 8,
+    width: 10,
+    height: 10,
+    borderRadius: 99,
+    backgroundColor: '#f59e0b',
+    top: -4
+  },
+  processingFoodDotB: {
+    position: 'absolute',
+    right: 12,
+    width: 9,
+    height: 9,
+    borderRadius: 99,
+    backgroundColor: '#34d399',
+    top: -3
+  },
+  processingFoodDotC: {
+    position: 'absolute',
+    left: 20,
+    width: 11,
+    height: 11,
+    borderRadius: 99,
+    backgroundColor: '#f472b6',
+    top: -4
+  },
+  processingFridgeDoor: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 64,
+    backgroundColor: '#bfdbfe',
+    borderRightWidth: 2,
+    borderColor: '#93c5fd'
+  },
+  processingFridgeHandle: {
+    position: 'absolute',
+    right: 12,
+    width: 4,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#1d4ed8'
+  },
+  processingSnowA: {
+    position: 'absolute',
+    left: 9,
+    top: 8,
+    fontSize: 13
+  },
+  processingSnowB: {
+    position: 'absolute',
+    right: 7,
+    bottom: 8,
+    fontSize: 12
+  },
+  processingTitle: {
+    color: '#f5ecff',
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 8
+  },
+  processingText: {
+    color: '#d9c7fb',
+    fontSize: 14,
+    textAlign: 'center'
   }
 });

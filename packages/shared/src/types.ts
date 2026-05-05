@@ -37,6 +37,7 @@ export interface Product {
 export interface InventoryItem extends Product {
   id: string;
   expirationDate: string;
+  originalExpirationDate?: string;
   quantity: number;
   location: 'fridge' | 'freezer' | 'pantry';
   createdAt: string;

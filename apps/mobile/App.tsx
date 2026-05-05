@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Easing, Image, LayoutAnimation, Modal, PanResponder, Platform, Pressable, SafeAreaView, ScrollView, Text, TextInput, UIManager, View } from 'react-native';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, Easing, Image, LayoutAnimation, Modal, PanResponder, Platform, Pressable, SafeAreaView, ScrollView, Switch, Text, TextInput, UIManager, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatDaysLabel, normalizeDateInput } from '@appfridge/shared';
-import type { RecipeSuggestion } from '@appfridge/shared';
+import type { ProductCategory, RecipeSuggestion } from '@appfridge/shared';
 import {
   AiRequestError,
   addInventoryItem,
@@ -14,6 +15,7 @@ import {
   removeInventoryItem,
   scanExpiryDateFromImage,
   scanProductNameFromImage,
+  unregisterPushToken,
   updateInventoryItem
 } from './src/api';
 import { registerForPushNotificationsAsync } from './src/notifications';
@@ -22,6 +24,7 @@ import type { InventoryResponseItem } from './src/types';
 
 type LocationType = 'fridge' | 'freezer' | 'pantry';
 type AiNoticeTone = 'neutral' | 'ok' | 'error';
+type DateStepSource = 'camera' | 'manual';
 
 const LOCATION_OPTIONS: Array<{ value: LocationType; label: string }> = [
   { value: 'fridge', label: 'Холодильник' },
@@ -29,6 +32,8 @@ const LOCATION_OPTIONS: Array<{ value: LocationType; label: string }> = [
 ];
 const KUROMI_BG_IMAGE_URI = 'https://upload.wikimedia.org/wikipedia/commons/7/74/Kuromi_clothing_and_accessories.jpg';
 const KUROMI_TITLE_IMAGE_URI = 'https://upload.wikimedia.org/wikipedia/commons/7/74/Kuromi_clothing_and_accessories.jpg';
+const PUSH_ENABLED_STORAGE_KEY = '@appfridge_push_enabled';
+const PUSH_TOKEN_STORAGE_KEY = '@appfridge_push_token';
 
 function getTodayParts() {
   const now = new Date();
@@ -63,21 +68,41 @@ function formatStatusLabel(status: InventoryResponseItem['insight']['status']): 
   return 'Свіжий';
 }
 
-function getCategoryIcon(category?: string): string {
-  if (!category) {
-    return '📦';
+function formatExpirationLabel(item: InventoryResponseItem): string {
+  if (item.location === 'freezer') {
+    return 'Без терміну (морозилка)';
   }
-  if (category.includes('Молоч')) return '🥛';
-  if (category.includes('Сири')) return '🧀';
-  if (category.includes('Йогур')) return '🥣';
-  if (category.includes("М'яс")) return '🥩';
-  if (category.includes('Риба')) return '🐟';
-  if (category.includes('Овоч')) return '🥕';
-  if (category.includes('Фрук')) return '🍎';
-  if (category.includes('Напої')) return '🧃';
-  if (category.includes('Солод')) return '🍫';
-  if (category.includes('Заморож')) return '🧊';
-  return '🍽️';
+  return item.expirationDate;
+}
+
+function formatShelfLifeLabel(item: InventoryResponseItem): string {
+  if (item.location === 'freezer') {
+    return 'Заморожено';
+  }
+  return formatDaysLabel(item.insight.daysLeft);
+}
+
+function inferProductCategory(name: string): ProductCategory {
+  const v = name.toLowerCase();
+  if (!v.trim()) return 'Інше';
+  if (/(молок|кефір|сметан|вершк|масл|cream|milk)/i.test(v)) return 'Молочні продукти';
+  if (/(сир|cheese|gouda|моцарел|бринз|almette)/i.test(v)) return 'Сири';
+  if (/(йогур|десерт|pudding)/i.test(v)) return 'Йогурти та десерти';
+  if (/(ковбас|сосиск|салям|шинка|ham|sausage)/i.test(v)) return 'Ковбаси';
+  if (/(м.?яс|курк|індич|ялович|свинин|beef|chicken|turkey|pork)/i.test(v)) return "М'ясо";
+  if (/(риба|лосос|тунец|оселед|shrimp|fish|salmon|tuna)/i.test(v)) return 'Риба та морепродукти';
+  if (/(овоч|томат|помідор|огір|морк|картоп|цибул|перец|капуст)/i.test(v)) return 'Овочі';
+  if (/(фрукт|яблук|банан|апельсин|лимон|груш|виноград|kiwi)/i.test(v)) return 'Фрукти';
+  if (/(сік|вода|cola|fanta|sprite|чай|кава|напій|drink|juice)/i.test(v)) return 'Напої';
+  if (/(чипс|сухарик|горіш|крекер|snack)/i.test(v)) return 'Снеки';
+  if (/(шоколад|цукерк|печив|торт|вафл|цукор|dessert|cookie)/i.test(v)) return 'Солодощі';
+  if (/(заморож|морозив|pelmeni|пельмен|нагетс|frozen)/i.test(v)) return 'Заморожені продукти';
+  if (/(консерв|тунец у бан|горошок|кукурудз)/i.test(v)) return 'Консерви';
+  if (/(соус|кетчуп|майонез|гірчиц|sauce)/i.test(v)) return 'Соуси';
+  if (/(хліб|булк|батон|лаваш|bun|bread)/i.test(v)) return 'Хліб та випічка';
+  if (/(макарон|паста|рис|греч|круп|вівсян)/i.test(v)) return 'Крупи та макарони';
+  if (/(готов|сендвіч|салат|піца|суп)/i.test(v)) return 'Готові страви';
+  return 'Інше';
 }
 
 type InventoryTileProps = {
@@ -96,6 +121,273 @@ type QuantityWheelProps = {
   max?: number;
   onChange: (next: number) => void;
 };
+
+type PhotoProcessingOverlayProps = {
+  visible: boolean;
+  label: string;
+  inline?: boolean;
+  overlayInParent?: boolean;
+};
+
+function PhotoProcessingOverlay({ visible, label, inline = false, overlayInParent = false }: PhotoProcessingOverlayProps) {
+  const door = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(1)).current;
+  const wobble = useRef(new Animated.Value(0)).current;
+  const glow = useRef(new Animated.Value(0.35)).current;
+  const shelfShift = useRef(new Animated.Value(0)).current;
+  const snowA = useRef(new Animated.Value(0)).current;
+  const snowB = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) {
+      door.setValue(0);
+      pulse.setValue(1);
+      wobble.setValue(0);
+      glow.setValue(0.35);
+      shelfShift.setValue(0);
+      snowA.setValue(0);
+      snowB.setValue(0);
+      return;
+    }
+
+    const doorLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(door, {
+          toValue: 1,
+          duration: 520,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        }),
+        Animated.timing(door, {
+          toValue: 0,
+          duration: 520,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        })
+      ])
+    );
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1.04,
+          duration: 450,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 450,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        })
+      ])
+    );
+
+    const wobbleLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(wobble, {
+          toValue: 1,
+          duration: 700,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        }),
+        Animated.timing(wobble, {
+          toValue: -1,
+          duration: 700,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        }),
+        Animated.timing(wobble, {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        })
+      ])
+    );
+
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, {
+          toValue: 0.72,
+          duration: 560,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        }),
+        Animated.timing(glow, {
+          toValue: 0.35,
+          duration: 560,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        })
+      ])
+    );
+
+    const shelfLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shelfShift, {
+          toValue: 1,
+          duration: 800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        }),
+        Animated.timing(shelfShift, {
+          toValue: 0,
+          duration: 800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        })
+      ])
+    );
+
+    const snowLoopA = Animated.loop(
+      Animated.timing(snowA, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.inOut(Easing.sin),
+        useNativeDriver: true
+      })
+    );
+    const snowLoopB = Animated.loop(
+      Animated.timing(snowB, {
+        toValue: 1,
+        duration: 1700,
+        easing: Easing.inOut(Easing.sin),
+        useNativeDriver: true
+      })
+    );
+
+    doorLoop.start();
+    pulseLoop.start();
+    wobbleLoop.start();
+    glowLoop.start();
+    shelfLoop.start();
+    snowLoopA.start();
+    snowLoopB.start();
+
+    return () => {
+      doorLoop.stop();
+      pulseLoop.stop();
+      wobbleLoop.stop();
+      glowLoop.stop();
+      shelfLoop.stop();
+      snowLoopA.stop();
+      snowLoopB.stop();
+    };
+  }, [door, pulse, wobble, glow, shelfShift, snowA, snowB, visible]);
+
+  const doorTransform = {
+    transform: [
+      {
+        translateX: door.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 8]
+        })
+      }
+    ]
+  };
+  const fridgeWobbleStyle = {
+    transform: [
+      {
+        rotate: wobble.interpolate({
+          inputRange: [-1, 0, 1],
+          outputRange: ['-3deg', '0deg', '3deg']
+        })
+      },
+      {
+        translateY: wobble.interpolate({
+          inputRange: [-1, 0, 1],
+          outputRange: [1, -2, 1]
+        })
+      }
+    ]
+  };
+  const shelfShiftStyle = {
+    transform: [
+      {
+        translateX: shelfShift.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-4, 4]
+        })
+      }
+    ]
+  };
+  const snowAStyle = {
+    transform: [
+      {
+        translateY: snowA.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-6, 6]
+        })
+      }
+    ]
+  };
+  const snowBStyle = {
+    transform: [
+      {
+        translateY: snowB.interpolate({
+          inputRange: [0, 1],
+          outputRange: [5, -5]
+        })
+      }
+    ]
+  };
+
+  if (!visible) {
+    return null;
+  }
+
+  if (inline) {
+    return (
+      <View style={overlayInParent ? styles.processingInlineOverlay : styles.processingInlineWrap}>
+        <Animated.View style={[styles.processingCard, { transform: [{ scale: pulse }] }]}>
+          <Animated.View style={[styles.processingFridge, fridgeWobbleStyle]}>
+            <Animated.View style={[styles.processingFridgeGlow, { opacity: glow }]} />
+            <View style={styles.processingShelfTop}>
+              <Animated.View style={[styles.processingFoodDotA, shelfShiftStyle]} />
+              <Animated.View style={[styles.processingFoodDotB, shelfShiftStyle]} />
+            </View>
+            <View style={styles.processingShelfBottom}>
+              <Animated.View style={[styles.processingFoodDotC, shelfShiftStyle]} />
+            </View>
+            <Animated.View style={[styles.processingFridgeDoor, doorTransform]} />
+            <View style={styles.processingFridgeHandle} />
+            <Animated.Text style={[styles.processingSnowA, snowAStyle]}>❄️</Animated.Text>
+            <Animated.Text style={[styles.processingSnowB, snowBStyle]}>❄️</Animated.Text>
+          </Animated.View>
+          <Text style={styles.processingTitle}>Обробляємо фото…</Text>
+          <Text style={styles.processingText}>{label}</Text>
+        </Animated.View>
+      </View>
+    );
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={styles.processingOverlay}>
+        <Animated.View style={[styles.processingCard, { transform: [{ scale: pulse }] }]}>
+          <Animated.View style={[styles.processingFridge, fridgeWobbleStyle]}>
+            <Animated.View style={[styles.processingFridgeGlow, { opacity: glow }]} />
+            <View style={styles.processingShelfTop}>
+              <Animated.View style={[styles.processingFoodDotA, shelfShiftStyle]} />
+              <Animated.View style={[styles.processingFoodDotB, shelfShiftStyle]} />
+            </View>
+            <View style={styles.processingShelfBottom}>
+              <Animated.View style={[styles.processingFoodDotC, shelfShiftStyle]} />
+            </View>
+            <Animated.View style={[styles.processingFridgeDoor, doorTransform]} />
+            <View style={styles.processingFridgeHandle} />
+            <Animated.Text style={[styles.processingSnowA, snowAStyle]}>❄️</Animated.Text>
+            <Animated.Text style={[styles.processingSnowB, snowBStyle]}>❄️</Animated.Text>
+          </Animated.View>
+          <Text style={styles.processingTitle}>Обробляємо фото…</Text>
+          <Text style={styles.processingText}>{label}</Text>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
 
 function QuantityWheel({ value, min = 1, max = 30, onChange }: QuantityWheelProps) {
   const itemHeight = 44;
@@ -325,13 +617,12 @@ function InventoryTile({
       ]}
     >
       <Pressable style={styles.inventoryTileTop} onPress={() => onOpen(item)}>
-        <Text style={styles.inventoryTileIcon}>{getCategoryIcon(item.category)}</Text>
         <Text numberOfLines={2} style={styles.inventoryTileTitle}>
           {item.name}
         </Text>
         <Text style={styles.inventoryTileMeta}>{item.quantity} шт.</Text>
-        <Text style={styles.inventoryTileMeta}>{item.expirationDate}</Text>
-        <Text style={styles.inventoryTileStatus}>{formatDaysLabel(item.insight.daysLeft)}</Text>
+        <Text style={styles.inventoryTileMeta}>{formatExpirationLabel(item)}</Text>
+        <Text style={styles.inventoryTileStatus}>{formatShelfLifeLabel(item)}</Text>
         <Text style={styles.inventoryDragHint}>
           {item.location === 'fridge' ? 'Свайп вправо → у морозилку' : 'Свайп вліво → у холодильник'} • Свайп вгору → видалити
         </Text>
@@ -345,11 +636,25 @@ function InventoryTile({
   );
 }
 
+const MemoInventoryTile = memo(
+  InventoryTile,
+  (prev, next) =>
+    prev.aiSelected === next.aiSelected &&
+    prev.item.id === next.item.id &&
+    prev.item.name === next.item.name &&
+    prev.item.quantity === next.item.quantity &&
+    prev.item.location === next.item.location &&
+    prev.item.expirationDate === next.item.expirationDate &&
+    prev.item.insight.status === next.item.insight.status &&
+    prev.item.insight.daysLeft === next.item.insight.daysLeft
+);
+
 export default function App() {
   const todayDefaults = useMemo(() => getTodayParts(), []);
   const [inventory, setInventory] = useState<InventoryResponseItem[]>([]);
   const [barcode, setBarcode] = useState('');
   const [productName, setProductName] = useState('');
+  const [productCategory, setProductCategory] = useState<ProductCategory | ''>('');
   const [productNote, setProductNote] = useState('');
   const [expirationDay, setExpirationDay] = useState(todayDefaults.day);
   const [expirationMonth, setExpirationMonth] = useState(todayDefaults.month);
@@ -362,11 +667,13 @@ export default function App() {
   const [manualProductModalOpen, setManualProductModalOpen] = useState(false);
   const [manualDateModalOpen, setManualDateModalOpen] = useState(false);
   const [finalizeModalOpen, setFinalizeModalOpen] = useState(false);
+  const [lastDateStepSource, setLastDateStepSource] = useState<DateStepSource>('camera');
   const [nameCameraOpen, setNameCameraOpen] = useState(false);
   const [nameCaptureBusy, setNameCaptureBusy] = useState(false);
   const [resumeManualProductAfterNameScan, setResumeManualProductAfterNameScan] = useState(false);
   const [manualProductName, setManualProductName] = useState('');
   const [manualProductQuantity, setManualProductQuantity] = useState('1');
+  const [manualProductCategory, setManualProductCategory] = useState<ProductCategory | ''>('');
   const [loading, setLoading] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [aiRecipes, setAiRecipes] = useState<RecipeSuggestion[]>([]);
@@ -376,6 +683,9 @@ export default function App() {
   const [aiNotice, setAiNotice] = useState<string>('Порада: додайте 2-3 продукти зі строком до 7 днів, тоді AI дає найкращі рецепти.');
   const [aiNoticeTone, setAiNoticeTone] = useState<AiNoticeTone>('neutral');
   const [swipeLock, setSwipeLock] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [pushSettingReady, setPushSettingReady] = useState(false);
+  const inventoryLoadInFlightRef = useRef(false);
   /** Ігноруємо відповіді застарілих паралельних lookup (подвійний скан / «Знайти» під час запиту). */
   const lookupGenerationRef = useRef(0);
   /** Один акт прийняття з камери: до відкриття сканера знову — блокуємо повторні onBarcodeScanned у тому ж кадрі. */
@@ -393,11 +703,28 @@ export default function App() {
 
   useEffect(() => {
     loadInventory();
-    registerPushNotifications();
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(PUSH_ENABLED_STORAGE_KEY);
+        setPushEnabled(raw == null ? true : raw === '1');
+      } finally {
+        setPushSettingReady(true);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!pushSettingReady || !pushEnabled) {
+      return;
+    }
+    void registerPushNotifications(false);
+  }, [pushEnabled, pushSettingReady]);
 
   useEffect(() => {
     setAiSelectedItemIds((current) => {
@@ -413,24 +740,65 @@ export default function App() {
     });
   }, [inventory]);
 
-  async function registerPushNotifications() {
-    const registration = await registerForPushNotificationsAsync();
-    if (!registration) {
+  async function registerPushNotifications(showAlerts = true) {
+    const result = await registerForPushNotificationsAsync();
+    if (!result.ok) {
+      if (!showAlerts) {
+        return;
+      }
+      const message =
+        result.reason === 'permission_denied'
+          ? 'Дозвольте сповіщення в Налаштуваннях iOS: Settings -> Notifications -> AppFridge.'
+          : result.reason === 'missing_project_id'
+            ? 'Не задано EAS projectId. Додайте EXPO_PUBLIC_EAS_PROJECT_ID у apps/mobile/.env і перезапустіть Expo.'
+          : result.message ?? 'Push не налаштовано.';
+      Alert.alert('Push не підключено', message);
       return;
     }
     try {
-      await registerPushToken(registration);
+      await registerPushToken(result.registration);
+      await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, result.registration.token);
+      if (showAlerts) {
+        Alert.alert('Push підключено', 'Сповіщення успішно увімкнено на цьому пристрої.');
+      }
     } catch {
-      // Backend may be offline during development.
+      if (showAlerts) {
+        Alert.alert('Push не збережено', 'Не вдалося передати токен на сервер. Перевірте backend і EXPO_PUBLIC_API_URL.');
+      }
+    }
+  }
+
+  async function handleTogglePush(next: boolean) {
+    setPushEnabled(next);
+    await AsyncStorage.setItem(PUSH_ENABLED_STORAGE_KEY, next ? '1' : '0');
+    if (next) {
+      await registerPushNotifications(true);
+      return;
+    }
+    try {
+      const token = await AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY);
+      if (token) {
+        await unregisterPushToken(token);
+      }
+      await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+      Alert.alert('Push вимкнено', 'Сповіщення відключено для цього пристрою.');
+    } catch {
+      Alert.alert('Помилка', 'Не вдалося вимкнути push на сервері.');
     }
   }
 
   async function loadInventory() {
+    if (inventoryLoadInFlightRef.current) {
+      return;
+    }
+    inventoryLoadInFlightRef.current = true;
     try {
       const items = await fetchInventory();
       setInventory(items);
     } catch {
       Alert.alert('Бекенд недоступний', 'Запустіть сервер перед перевіркою мобільного застосунку.');
+    } finally {
+      inventoryLoadInFlightRef.current = false;
     }
   }
 
@@ -451,6 +819,7 @@ export default function App() {
       }
       const resolvedName = isGenericUnknownProductName(product.name, code) ? '' : product.name;
       setProductName(resolvedName);
+      setProductCategory((product.category as ProductCategory) ?? '');
       setProductNote(product.note?.trim() ? product.note : '');
 
       if (product.lookupStatus === 'catalog') {
@@ -462,15 +831,18 @@ export default function App() {
 
       setManualProductName(resolvedName);
       setManualProductQuantity('1');
+      setManualProductCategory((product.category as ProductCategory) ?? inferProductCategory(resolvedName));
       setManualProductModalOpen(true);
     } catch {
       if (generation !== lookupGenerationRef.current) {
         return;
       }
       setProductName('');
+      setProductCategory('');
       setProductNote('');
       setManualProductName('');
       setManualProductQuantity('1');
+      setManualProductCategory('Інше');
       setManualProductModalOpen(true);
     } finally {
       if (generation === lookupGenerationRef.current) {
@@ -531,16 +903,19 @@ export default function App() {
       return;
     }
     const nextQty = Math.max(1, Number(manualProductQuantity) || 1);
+    const autoCategory = manualProductCategory || inferProductCategory(name);
     setProductName(name);
+    setProductCategory(autoCategory);
     setQuantity(String(nextQty));
     setManualProductModalOpen(false);
     void requestExpiryCamera();
   }
 
-  function applyExpiryDateAndOpenFinalize(day: number, month: number, year: number) {
+  function applyExpiryDateAndOpenFinalize(day: number, month: number, year: number, source: DateStepSource) {
     setExpirationDay(String(day).padStart(2, '0'));
     setExpirationMonth(String(month).padStart(2, '0'));
     setExpirationYear(String(year));
+    setLastDateStepSource(source);
     setExpiryCameraOpen(false);
     setManualDateModalOpen(false);
     setFinalizeModalOpen(true);
@@ -556,7 +931,7 @@ export default function App() {
       return;
     }
     const [y, m, d] = normalized.split('-').map((x) => Number(x));
-    applyExpiryDateAndOpenFinalize(d, m, y);
+    applyExpiryDateAndOpenFinalize(d, m, y, 'manual');
   }
 
   async function captureExpiryFromPhoto() {
@@ -581,7 +956,7 @@ export default function App() {
         mimeType: 'image/jpeg'
       });
 
-      applyExpiryDateAndOpenFinalize(parsed.day, parsed.month, parsed.year);
+      applyExpiryDateAndOpenFinalize(parsed.day, parsed.month, parsed.year, 'camera');
     } catch (error) {
       if (error instanceof AiRequestError) {
         Alert.alert('Не вдалося розпізнати дату', error.message);
@@ -617,6 +992,9 @@ export default function App() {
 
       setManualProductName(parsed.name);
       setProductName(parsed.name);
+      const autoCategory = inferProductCategory(parsed.name);
+      setManualProductCategory(autoCategory);
+      setProductCategory(autoCategory);
       closeNameCameraAndReturn();
       Alert.alert('Готово', `Назва розпізнана: ${parsed.name}`);
     } catch (error) {
@@ -653,12 +1031,14 @@ export default function App() {
         expirationDate: normalizedExpirationDate,
         quantity: Math.max(1, Number(quantity) || 1),
         location,
+        ...(productCategory ? { category: productCategory } : {}),
         ...(productNote.trim() ? { note: productNote.trim() } : {})
       });
 
       setInventory((current) => [created, ...current]);
       setBarcode('');
       setProductName('');
+      setProductCategory('');
       setProductNote('');
       setExpirationDay(todayDefaults.day);
       setExpirationMonth(todayDefaults.month);
@@ -668,6 +1048,7 @@ export default function App() {
       setFinalizeModalOpen(false);
       setManualDateModalOpen(false);
       setManualProductModalOpen(false);
+      setManualProductCategory('');
     } catch {
       Alert.alert('Помилка', 'Не вдалося додати продукт у бекенд.');
     }
@@ -682,6 +1063,31 @@ export default function App() {
     } catch {
       Alert.alert('Помилка', 'Не вдалося видалити продукт.');
     }
+  }
+
+  function backFromManualProductStep() {
+    setManualProductModalOpen(false);
+    void requestScanner();
+  }
+
+  function backFromManualDateStep() {
+    setManualDateModalOpen(false);
+    setTimeout(() => {
+      setExpiryCameraOpen(true);
+    }, 60);
+  }
+
+  function backFromFinalizeStep() {
+    setFinalizeModalOpen(false);
+    if (lastDateStepSource === 'manual') {
+      setTimeout(() => {
+        setManualDateModalOpen(true);
+      }, 60);
+      return;
+    }
+    setTimeout(() => {
+      setExpiryCameraOpen(true);
+    }, 60);
   }
 
   function requestDeleteItem(id: string) {
@@ -724,9 +1130,15 @@ export default function App() {
     }
 
     try {
-      const updated = await updateInventoryItem(id, patch);
+      const { item: updated, mergedRemovedId } = await updateInventoryItem(id, patch);
       animateListTransition();
-      setInventory((current) => current.map((item) => (item.id === id ? updated : item)));
+      setInventory((current) => {
+        const mapped = current.map((item) => (item.id === id ? updated : item));
+        if (!mergedRemovedId) {
+          return mapped;
+        }
+        return mapped.filter((item) => item.id !== mergedRemovedId);
+      });
     } catch {
       if (optimistic) {
         animateListTransition();
@@ -755,6 +1167,7 @@ export default function App() {
     try {
       const next = await fetchAiRecipes(aiSelectedItemIds);
       setAiRecipes(next);
+      setAiSelectedItemIds([]);
       if (next.length === 0) {
         setAiNotice('AI не повернув рецептів. Спробуйте додати більше продуктів або уточнити дати придатності.');
         setAiNoticeTone('neutral');
@@ -860,29 +1273,24 @@ export default function App() {
           <Pressable style={styles.button} onPress={requestScanner}>
             <Text style={styles.buttonText}>Відкрити сканер</Text>
           </Pressable>
+        </View>
 
-          {scanning && permission?.granted && (
-            <View style={styles.scannerBox}>
-              <CameraView
-                barcodeScannerSettings={{
-                  barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'qr']
-                }}
-                onBarcodeScanned={({ data }) => {
-                  const raw = typeof data === 'string' ? data.trim() : '';
-                  if (!raw || scanConsumedRef.current) {
-                    return;
-                  }
-                  scanConsumedRef.current = true;
-                  setScanning(false);
-                  void handleLookup(raw);
-                }}
-                style={{ flex: 1 }}
-              />
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Параметри</Text>
+          <View style={styles.settingRow}>
+            <View style={styles.settingTextWrap}>
+              <Text style={styles.settingTitle}>Push повідомлення</Text>
+              <Text style={styles.settingHint}>
+                {pushEnabled ? 'Отримувати нагадування про строки придатності.' : 'Push вимкнено на цьому пристрої.'}
+              </Text>
             </View>
-          )}
-
-          {permission?.granted === false && <Text style={styles.scannerHint}>Потрібен доступ до камери.</Text>}
-
+            <Switch
+              value={pushEnabled}
+              onValueChange={(next) => void handleTogglePush(next)}
+              trackColor={{ false: '#5b3a8a', true: '#c084fc' }}
+              thumbColor={pushEnabled ? '#7e22ce' : '#ded2f5'}
+            />
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -899,7 +1307,7 @@ export default function App() {
             {fridgeItems.length === 0 ? <Text style={styles.inventoryGroupEmpty}>Поки що порожньо.</Text> : null}
             <View style={styles.inventoryGrid}>
               {fridgeItems.map((item) => (
-                <InventoryTile
+                <MemoInventoryTile
                   key={item.id}
                 item={item}
                 aiSelected={aiSelectedItemIds.includes(item.id)}
@@ -923,7 +1331,7 @@ export default function App() {
             {freezerItems.length === 0 ? <Text style={styles.inventoryGroupEmpty}>Поки що порожньо.</Text> : null}
             <View style={styles.inventoryGrid}>
               {freezerItems.map((item) => (
-                <InventoryTile
+                <MemoInventoryTile
                   key={item.id}
                 item={item}
                 aiSelected={aiSelectedItemIds.includes(item.id)}
@@ -985,7 +1393,7 @@ export default function App() {
 
       </ScrollView>
 
-      <Modal visible={manualProductModalOpen} transparent animationType="fade" onRequestClose={() => setManualProductModalOpen(false)}>
+      <Modal visible={manualProductModalOpen} transparent animationType="fade" onRequestClose={backFromManualProductStep}>
         <View style={styles.detailOverlay}>
           <View style={styles.detailCard}>
             <Text style={styles.sectionTitle}>Товар не знайдено</Text>
@@ -995,8 +1403,12 @@ export default function App() {
               placeholder="Назва товару"
               placeholderTextColor="#7f95a3"
               value={manualProductName}
-              onChangeText={setManualProductName}
+              onChangeText={(value) => {
+                setManualProductName(value);
+                setManualProductCategory(inferProductCategory(value));
+              }}
             />
+            <Text style={styles.dateHint}>Категорія (авто): {manualProductCategory || 'Інше'}</Text>
             <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void requestNameCamera()} disabled={nameCaptureBusy}>
               <Text style={styles.buttonTextLight}>{nameCaptureBusy ? 'Зчитуємо…' : 'Сканувати назву з фото'}</Text>
             </Pressable>
@@ -1012,7 +1424,40 @@ export default function App() {
             <Pressable style={[styles.button, styles.buttonSecondary]} onPress={confirmManualProductEntry}>
               <Text style={styles.buttonTextLight}>Далі: скан дати</Text>
             </Pressable>
-            <Pressable style={styles.detailCloseButton} onPress={() => setManualProductModalOpen(false)}>
+            <Pressable style={styles.detailCloseButton} onPress={backFromManualProductStep}>
+              <Text style={styles.detailCloseText}>Скасувати</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={scanning} transparent animationType="fade" onRequestClose={() => setScanning(false)}>
+        <View style={styles.detailOverlay}>
+          <View style={styles.detailCard}>
+            <Text style={styles.sectionTitle}>Сканер штрихкоду</Text>
+            <Text style={styles.sectionText}>Наведіть камеру на штрихкод товару.</Text>
+            {permission?.granted ? (
+              <View style={styles.scannerBox}>
+                <CameraView
+                  barcodeScannerSettings={{
+                    barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'qr']
+                  }}
+                  onBarcodeScanned={({ data }) => {
+                    const raw = typeof data === 'string' ? data.trim() : '';
+                    if (!raw || scanConsumedRef.current) {
+                      return;
+                    }
+                    scanConsumedRef.current = true;
+                    setScanning(false);
+                    void handleLookup(raw);
+                  }}
+                  style={{ flex: 1 }}
+                />
+              </View>
+            ) : (
+              <Text style={styles.scannerHint}>Потрібен доступ до камери.</Text>
+            )}
+            <Pressable style={styles.detailCloseButton} onPress={() => setScanning(false)}>
               <Text style={styles.detailCloseText}>Скасувати</Text>
             </Pressable>
           </View>
@@ -1030,6 +1475,7 @@ export default function App() {
             <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void captureProductNameFromPhoto()} disabled={nameCaptureBusy}>
               <Text style={styles.buttonTextLight}>{nameCaptureBusy ? 'Зчитуємо…' : 'Зчитати назву'}</Text>
             </Pressable>
+            <PhotoProcessingOverlay inline overlayInParent visible={nameCaptureBusy} label="Розпізнаємо назву продукту" />
             <Pressable style={styles.detailCloseButton} onPress={closeNameCameraAndReturn}>
               <Text style={styles.detailCloseText}>Закрити</Text>
             </Pressable>
@@ -1048,6 +1494,7 @@ export default function App() {
             <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void captureExpiryFromPhoto()} disabled={expiryCaptureBusy}>
               <Text style={styles.buttonTextLight}>{expiryCaptureBusy ? 'Зчитуємо…' : 'Зчитати дату'}</Text>
             </Pressable>
+            <PhotoProcessingOverlay inline overlayInParent visible={expiryCaptureBusy} label="Розпізнаємо дату придатності" />
             <Pressable
               style={[styles.button, styles.buttonSecondary]}
               onPress={() => {
@@ -1067,7 +1514,7 @@ export default function App() {
         </View>
       </Modal>
 
-      <Modal visible={manualDateModalOpen} transparent animationType="fade" onRequestClose={() => setManualDateModalOpen(false)}>
+      <Modal visible={manualDateModalOpen} transparent animationType="fade" onRequestClose={backFromManualDateStep}>
         <View style={styles.detailOverlay}>
           <View style={styles.detailCard}>
             <Text style={styles.sectionTitle}>Дата вручну</Text>
@@ -1104,14 +1551,14 @@ export default function App() {
             <Pressable style={[styles.button, styles.buttonSecondary]} onPress={confirmManualDateEntry}>
               <Text style={styles.buttonTextLight}>Далі: місце і збереження</Text>
             </Pressable>
-            <Pressable style={styles.detailCloseButton} onPress={() => setManualDateModalOpen(false)}>
+            <Pressable style={styles.detailCloseButton} onPress={backFromManualDateStep}>
               <Text style={styles.detailCloseText}>Скасувати</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
 
-      <Modal visible={finalizeModalOpen} transparent animationType="fade" onRequestClose={() => setFinalizeModalOpen(false)}>
+      <Modal visible={finalizeModalOpen} transparent animationType="fade" onRequestClose={backFromFinalizeStep}>
         <View style={styles.detailOverlay}>
           <View style={styles.detailCard}>
             <Text style={styles.sectionTitle}>Фінальний крок</Text>
@@ -1135,7 +1582,7 @@ export default function App() {
             <Pressable style={styles.button} onPress={() => void handleAddItem()}>
               <Text style={styles.buttonText}>Зберегти продукт</Text>
             </Pressable>
-            <Pressable style={styles.detailCloseButton} onPress={() => setFinalizeModalOpen(false)}>
+            <Pressable style={styles.detailCloseButton} onPress={backFromFinalizeStep}>
               <Text style={styles.detailCloseText}>Скасувати</Text>
             </Pressable>
           </View>
@@ -1147,15 +1594,13 @@ export default function App() {
           <View style={styles.detailCard}>
             {selectedInventoryItem ? (
               <>
-                <Text style={styles.detailTitle}>
-                  {getCategoryIcon(selectedInventoryItem.category)} {selectedInventoryItem.name}
-                </Text>
+                <Text style={styles.detailTitle}>{selectedInventoryItem.name}</Text>
                 <Text style={styles.detailLine}>Штрихкод: {selectedInventoryItem.barcode}</Text>
                 <Text style={styles.detailLine}>Кількість: {selectedInventoryItem.quantity} шт.</Text>
                 <Text style={styles.detailLine}>Місце: {formatLocationLabel(selectedInventoryItem.location)}</Text>
-                <Text style={styles.detailLine}>Термін придатності: {selectedInventoryItem.expirationDate}</Text>
+                <Text style={styles.detailLine}>Термін придатності: {formatExpirationLabel(selectedInventoryItem)}</Text>
                 <Text style={styles.detailLine}>Статус: {formatStatusLabel(selectedInventoryItem.insight.status)}</Text>
-                <Text style={styles.detailLine}>{formatDaysLabel(selectedInventoryItem.insight.daysLeft)}</Text>
+                <Text style={styles.detailLine}>{formatShelfLifeLabel(selectedInventoryItem)}</Text>
                 {selectedInventoryItem.category ? <Text style={styles.detailLine}>Категорія: {selectedInventoryItem.category}</Text> : null}
 
                 <Pressable

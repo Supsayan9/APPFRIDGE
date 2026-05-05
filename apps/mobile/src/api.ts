@@ -56,7 +56,7 @@ export function updateInventoryItem(
   id: string,
   patch: Partial<Pick<InventoryItem, 'quantity' | 'location'>>
 ) {
-  return request<InventoryResponseItem>(`/inventory/${id}`, {
+  return request<{ item: InventoryResponseItem; mergedRemovedId?: string }>(`/inventory/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(patch)
   });
@@ -109,6 +109,13 @@ export function registerPushToken(payload: PushRegistration) {
   return request<{ ok: true }>('/push/register', {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export function unregisterPushToken(token: string) {
+  return request<{ ok: true }>('/push/unregister', {
+    method: 'POST',
+    body: JSON.stringify({ token })
   });
 }
 

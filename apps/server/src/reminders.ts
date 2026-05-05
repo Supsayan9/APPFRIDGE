@@ -36,15 +36,18 @@ export async function sendReminderPushes() {
     return { sent: 0, urgentCount: urgentItems.length };
   }
 
-  const messages: ExpoPushMessage[] = tokens.flatMap((token) =>
-    urgentItems.slice(0, 3).map((item) => ({
-      to: token,
-      sound: 'default',
-      title: 'AppFridge reminder',
-      body: buildReminderMessage(item),
-      data: { itemId: item.id }
-    }))
-  );
+  const top = urgentItems.slice(0, 3);
+  const summaryBody =
+    top.length === 1
+      ? buildReminderMessage(top[0])
+      : `Увага: ${urgentItems.length} продукт(и) потребують уваги. Найтерміновіший: ${top[0]?.name ?? 'продукт'}.`;
+  const messages: ExpoPushMessage[] = tokens.map((token) => ({
+    to: token,
+    sound: 'default',
+    title: 'AppFridge reminder',
+    body: summaryBody,
+    data: top[0] ? { itemId: top[0].id } : undefined
+  }));
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'

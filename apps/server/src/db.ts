@@ -2,8 +2,11 @@ import Database from 'better-sqlite3';
 import type { InventoryItem, Product, PushRegistration } from '@appfridge/shared';
 
 const databasePath = process.env.DATABASE_PATH || './appfridge.db';
+export const FREEZER_EXPIRATION_SENTINEL = '9999-12-31';
 
 export const db = new Database(databasePath);
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
 
 function ensureProductExtraColumns() {
   const cols = db.prepare(`PRAGMA table_info(products)`).all() as Array<{ name: string }>;
@@ -13,6 +16,14 @@ function ensureProductExtraColumns() {
   }
   if (!names.has('note')) {
     db.exec(`ALTER TABLE products ADD COLUMN note TEXT`);
+  }
+}
+
+function ensureInventoryExtraColumns() {
+  const cols = db.prepare(`PRAGMA table_info(inventory_items)`).all() as Array<{ name: string }>;
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has('originalExpirationDate')) {
+    db.exec(`ALTER TABLE inventory_items ADD COLUMN originalExpirationDate TEXT`);
   }
 }
 
@@ -45,7 +56,18 @@ export function initDb() {
       createdAt TEXT NOT NULL
     );
   `);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_inventory_exp_created
+    ON inventory_items(expirationDate, createdAt DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_inventory_barcode_exp_location
+    ON inventory_items(barcode, expirationDate, location);
+
+    CREATE INDEX IF NOT EXISTS idx_inventory_location_exp
+    ON inventory_items(location, expirationDate);
+  `);
   ensureProductExtraColumns();
+  ensureInventoryExtraColumns();
 }
 
 export function upsertProduct(product: Product) {
@@ -102,7 +124,7 @@ export function findProduct(barcode: string): Product | undefined {
 
 export function listInventory(): InventoryItem[] {
   return db.prepare(`
-    SELECT id, barcode, name, brand, category, imageUrl, expirationDate, quantity, location, createdAt
+    SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
     FROM inventory_items
     ORDER BY expirationDate ASC, createdAt DESC
   `).all() as InventoryItem[];
@@ -112,9 +134,10 @@ export function insertInventoryItem(item: InventoryItem) {
   db.prepare(`
     INSERT INTO inventory_items (
       id, barcode, name, brand, category, imageUrl, expirationDate, quantity, location, createdAt
+      , originalExpirationDate
     )
     VALUES (
-      @id, @barcode, @name, @brand, @category, @imageUrl, @expirationDate, @quantity, @location, @createdAt
+      @id, @barcode, @name, @brand, @category, @imageUrl, @expirationDate, @quantity, @location, @createdAt, @originalExpirationDate
     )
   `).run({
     id: item.id,
@@ -124,6 +147,7 @@ export function insertInventoryItem(item: InventoryItem) {
     category: item.category ?? null,
     imageUrl: item.imageUrl ?? null,
     expirationDate: item.expirationDate,
+    originalExpirationDate: item.originalExpirationDate ?? null,
     quantity: item.quantity,
     location: item.location,
     createdAt: item.createdAt
@@ -133,11 +157,27 @@ export function insertInventoryItem(item: InventoryItem) {
 export function findInventoryDuplicate(params: {
   barcode: string;
   expirationDate: string;
+  originalExpirationDate?: string | null;
   location: InventoryItem['location'];
 }): InventoryItem | undefined {
+  if (params.location === 'freezer') {
+    return db
+      .prepare(
+        `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
+         FROM inventory_items
+         WHERE barcode = @barcode AND location = @location AND COALESCE(originalExpirationDate, expirationDate) = @originalExpirationDate
+         ORDER BY createdAt DESC
+         LIMIT 1`
+      )
+      .get({
+        barcode: params.barcode,
+        location: params.location,
+        originalExpirationDate: params.originalExpirationDate ?? params.expirationDate
+      }) as InventoryItem | undefined;
+  }
   return db
     .prepare(
-      `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, quantity, location, createdAt
+      `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
        FROM inventory_items
        WHERE barcode = @barcode AND expirationDate = @expirationDate AND location = @location
        ORDER BY createdAt DESC
@@ -153,7 +193,7 @@ export function findInventoryDuplicate(params: {
 export function findInventoryItemById(id: string): InventoryItem | undefined {
   return db
     .prepare(
-      `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, quantity, location, createdAt
+      `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
        FROM inventory_items
        WHERE id = ?`
     )
@@ -171,15 +211,29 @@ export function updateInventoryItem(
 
   const quantity = typeof patch.quantity === 'number' ? Math.max(1, Math.round(patch.quantity)) : current.quantity;
   const location = patch.location ?? current.location;
+  let expirationDate = current.expirationDate;
+  let originalExpirationDate = current.originalExpirationDate ?? null;
+
+  if (location !== current.location) {
+    if (location === 'freezer') {
+      originalExpirationDate = current.originalExpirationDate ?? current.expirationDate;
+      expirationDate = FREEZER_EXPIRATION_SENTINEL;
+    } else if (current.location === 'freezer') {
+      expirationDate = current.originalExpirationDate ?? current.expirationDate;
+      originalExpirationDate = null;
+    }
+  }
 
   db.prepare(
     `UPDATE inventory_items
-     SET quantity = @quantity, location = @location
+     SET quantity = @quantity, location = @location, expirationDate = @expirationDate, originalExpirationDate = @originalExpirationDate
      WHERE id = @id`
   ).run({
     id,
     quantity,
-    location
+    location,
+    expirationDate,
+    originalExpirationDate
   });
 
   return findInventoryItemById(id);
@@ -199,6 +253,10 @@ export function savePushToken(registration: PushRegistration) {
     ...registration,
     createdAt: new Date().toISOString()
   });
+}
+
+export function deletePushToken(token: string) {
+  db.prepare(`DELETE FROM push_tokens WHERE token = ?`).run(token);
 }
 
 export function listPushTokens(): string[] {

@@ -3,7 +3,19 @@ import cors from 'cors';
 import express from 'express';
 import cron from 'node-cron';
 import { buildRecipeSuggestions, getInventoryInsight, type InventoryItem, type PushRegistration } from '@appfridge/shared';
-import { deleteInventoryItem, findInventoryDuplicate, initDb, insertInventoryItem, listInventory, savePushToken, updateInventoryItem, upsertProduct } from './db.js';
+import {
+  deleteInventoryItem,
+  deletePushToken,
+  FREEZER_EXPIRATION_SENTINEL,
+  findInventoryDuplicate,
+  findInventoryItemById,
+  initDb,
+  insertInventoryItem,
+  listInventory,
+  savePushToken,
+  updateInventoryItem,
+  upsertProduct
+} from './db.js';
 import {
   AiInvalidApiKeyError,
   AiNotConfiguredError,
@@ -77,9 +89,13 @@ app.post('/inventory', (req, res) => {
     category: body.category
   });
 
+  const effectiveExpirationDate = body.location === 'freezer' ? FREEZER_EXPIRATION_SENTINEL : normalizedDate;
+  const originalExpirationDate = body.location === 'freezer' ? normalizedDate : undefined;
+
   const duplicate = findInventoryDuplicate({
     barcode,
-    expirationDate: normalizedDate,
+    expirationDate: effectiveExpirationDate,
+    originalExpirationDate,
     location: body.location
   });
   if (duplicate) {
@@ -110,7 +126,8 @@ app.post('/inventory', (req, res) => {
   const item: InventoryItem = {
     ...body,
     quantity,
-    expirationDate: normalizedDate,
+    expirationDate: effectiveExpirationDate,
+    originalExpirationDate,
     barcode,
     category,
     id: crypto.randomUUID(),
@@ -168,15 +185,59 @@ app.patch('/inventory/:id', (req, res) => {
     return;
   }
 
-  const updated = updateInventoryItem(req.params.id, patch);
+  const current = findInventoryItemById(req.params.id);
+  if (!current) {
+    res.status(404).json({ error: 'not_found', message: 'Продукт не знайдено.' });
+    return;
+  }
+
+  let updated: InventoryItem | undefined;
+  let mergedRemovedId: string | undefined;
+  const targetLocation = patch.location;
+  if (targetLocation && targetLocation !== current.location) {
+    const targetDateForLookup =
+      targetLocation === 'freezer'
+        ? FREEZER_EXPIRATION_SENTINEL
+        : current.location === 'freezer'
+          ? current.originalExpirationDate ?? current.expirationDate
+          : current.expirationDate;
+    const targetOriginalForLookup =
+      targetLocation === 'freezer' ? current.originalExpirationDate ?? current.expirationDate : undefined;
+
+    const duplicate = findInventoryDuplicate({
+      barcode: current.barcode,
+      expirationDate: targetDateForLookup,
+      originalExpirationDate: targetOriginalForLookup,
+      location: targetLocation
+    });
+
+    if (duplicate && duplicate.id !== current.id) {
+      const currentQty = typeof patch.quantity === 'number' ? patch.quantity : current.quantity;
+      const mergedQty = currentQty + duplicate.quantity;
+      updated = updateInventoryItem(current.id, {
+        quantity: mergedQty,
+        location: targetLocation
+      });
+      deleteInventoryItem(duplicate.id);
+      mergedRemovedId = duplicate.id;
+    } else {
+      updated = updateInventoryItem(req.params.id, patch);
+    }
+  } else {
+    updated = updateInventoryItem(req.params.id, patch);
+  }
+
   if (!updated) {
     res.status(404).json({ error: 'not_found', message: 'Продукт не знайдено.' });
     return;
   }
 
   res.json({
-    ...updated,
-    insight: getInventoryInsight(updated)
+    item: {
+      ...updated,
+      insight: getInventoryInsight(updated)
+    },
+    mergedRemovedId
   });
 });
 
@@ -382,6 +443,16 @@ app.post('/push/register', (req, res) => {
   const registration = req.body as PushRegistration;
   savePushToken(registration);
   res.status(201).json({ ok: true });
+});
+
+app.post('/push/unregister', (req, res) => {
+  const token = String(req.body?.token ?? '').trim();
+  if (!token) {
+    res.status(400).json({ error: 'invalid_token', message: 'Потрібен token.' });
+    return;
+  }
+  deletePushToken(token);
+  res.status(200).json({ ok: true });
 });
 
 app.post('/push/send-now', async (_req, res) => {

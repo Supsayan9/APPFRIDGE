@@ -1,5 +1,6 @@
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 Notifications.setNotificationHandler({
@@ -11,9 +12,13 @@ Notifications.setNotificationHandler({
   })
 });
 
-export async function registerForPushNotificationsAsync() {
+export type PushRegistrationResult =
+  | { ok: true; registration: { token: string; platform: 'ios' | 'android' } }
+  | { ok: false; reason: 'simulator' | 'permission_denied' | 'missing_project_id' | 'token_error'; message?: string };
+
+export async function registerForPushNotificationsAsync(): Promise<PushRegistrationResult> {
   if (!Device.isDevice) {
-    return null;
+    return { ok: false, reason: 'simulator', message: 'Push працює тільки на фізичному пристрої.' };
   }
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -25,7 +30,7 @@ export async function registerForPushNotificationsAsync() {
   }
 
   if (finalStatus !== 'granted') {
-    return null;
+    return { ok: false, reason: 'permission_denied', message: 'Доступ до сповіщень не надано.' };
   }
 
   if (Platform.OS === 'android') {
@@ -35,9 +40,31 @@ export async function registerForPushNotificationsAsync() {
     });
   }
 
-  const token = await Notifications.getExpoPushTokenAsync();
-  return {
-    token: token.data,
-    platform: Platform.OS === 'ios' ? 'ios' : 'android'
-  } as const;
+  try {
+    const projectId =
+      process.env.EXPO_PUBLIC_EAS_PROJECT_ID ??
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      Constants.easConfig?.projectId;
+    if (!projectId) {
+      return {
+        ok: false,
+        reason: 'missing_project_id',
+        message: 'Не задано EXPO_PUBLIC_EAS_PROJECT_ID (EAS projectId) у apps/mobile/.env.'
+      };
+    }
+    const token = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+    return {
+      ok: true,
+      registration: {
+        token: token.data,
+        platform: Platform.OS === 'ios' ? 'ios' : 'android'
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'token_error',
+      message: error instanceof Error ? error.message : 'Не вдалося отримати Expo Push Token.'
+    };
+  }
 }
