@@ -14,9 +14,11 @@ import {
   registerPushToken,
   removeInventoryItem,
   scanExpiryDateFromImage,
+  fetchSaladChefOrders,
   scanProductNameFromImage,
   unregisterPushToken,
-  updateInventoryItem
+  updateInventoryItem,
+  type ProfileOwner
 } from './src/api';
 import { registerForPushNotificationsAsync } from './src/notifications';
 import { styles } from './src/styles';
@@ -25,6 +27,153 @@ import type { InventoryResponseItem } from './src/types';
 type LocationType = 'fridge' | 'freezer' | 'pantry';
 type AiNoticeTone = 'neutral' | 'ok' | 'error';
 type DateStepSource = 'camera' | 'manual';
+type SaladCategory = 'Овочі' | 'Сири' | 'Зелень' | 'Додатки';
+type SaladCategoryFilter = SaladCategory | 'Усе';
+type SaladChefOrder = {
+  id: string;
+  title: string;
+  description: string;
+  ingredients: string[];
+  steps: string[];
+};
+
+function ProfileWaterfallDecor() {
+  const streams = useRef(
+    Array.from({ length: 7 }, (_, index) => ({
+      x: 8 + index * 14,
+      delay: index * 260,
+      duration: 2400 + (index % 3) * 380,
+      opacity: 0.1 + (index % 4) * 0.03,
+      progress: new Animated.Value(0)
+    }))
+  ).current;
+
+  useEffect(() => {
+    const loops = streams.map((stream) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(stream.progress, {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: true
+          }),
+          Animated.delay(stream.delay),
+          Animated.timing(stream.progress, {
+            toValue: 1,
+            duration: stream.duration,
+            easing: Easing.linear,
+            useNativeDriver: true
+          })
+        ])
+      )
+    );
+    loops.forEach((loop) => loop.start());
+    return () => {
+      loops.forEach((loop) => loop.stop());
+    };
+  }, [streams]);
+
+  return (
+    <View pointerEvents="none" style={styles.profileWaterfallLayer}>
+      {streams.map((stream, index) => {
+        const translateY = stream.progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-120, 520]
+        });
+        return (
+          <Animated.View
+            key={`waterfall-${index}`}
+            style={[
+              styles.profileWaterfallDrop,
+              {
+                left: `${stream.x}%`,
+                opacity: stream.opacity,
+                transform: [{ translateY }]
+              }
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+function TwinkleStarsDecor() {
+  const stars = useRef(
+    Array.from({ length: 24 }, (_, index) => ({
+      leftPct: 4 + ((index * 7) % 92),
+      topPct: 6 + ((index * 11) % 88),
+      size: 2 + (index % 5),
+      delay: index * 130,
+      duration: 1600 + (index % 5) * 260,
+      alpha: new Animated.Value(0.08),
+      scale: new Animated.Value(0.9)
+    }))
+  ).current;
+
+  useEffect(() => {
+    const loops = stars.map((star) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(star.delay),
+          Animated.parallel([
+            Animated.timing(star.alpha, {
+              toValue: 0.26,
+              duration: Math.round(star.duration * 0.5),
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true
+            }),
+            Animated.timing(star.scale, {
+              toValue: 1.2,
+              duration: Math.round(star.duration * 0.5),
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true
+            })
+          ]),
+          Animated.parallel([
+            Animated.timing(star.alpha, {
+              toValue: 0.07,
+              duration: Math.round(star.duration * 0.5),
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true
+            }),
+            Animated.timing(star.scale, {
+              toValue: 0.88,
+              duration: Math.round(star.duration * 0.5),
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true
+            })
+          ])
+        ])
+      )
+    );
+    loops.forEach((loop) => loop.start());
+    return () => {
+      loops.forEach((loop) => loop.stop());
+    };
+  }, [stars]);
+
+  return (
+    <View pointerEvents="none" style={styles.twinkleLayer}>
+      {stars.map((star, index) => (
+        <Animated.View
+          key={`twinkle-${index}`}
+          style={[
+            styles.twinkleStar,
+            {
+              left: `${star.leftPct}%`,
+              top: `${star.topPct}%`,
+              width: star.size,
+              height: star.size,
+              opacity: star.alpha,
+              transform: [{ scale: star.scale }]
+            }
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
 
 const LOCATION_OPTIONS: Array<{ value: LocationType; label: string }> = [
   { value: 'fridge', label: 'Холодильник' },
@@ -32,8 +181,62 @@ const LOCATION_OPTIONS: Array<{ value: LocationType; label: string }> = [
 ];
 const KUROMI_BG_IMAGE_URI = 'https://upload.wikimedia.org/wikipedia/commons/7/74/Kuromi_clothing_and_accessories.jpg';
 const KUROMI_TITLE_IMAGE_URI = 'https://upload.wikimedia.org/wikipedia/commons/7/74/Kuromi_clothing_and_accessories.jpg';
+const VLAD_PROFILE_IMAGE = require('./assets/vlad-profile.jpeg');
+const RIMMA_PROFILE_IMAGE = require('./assets/rimma-profile.jpeg');
+const RIMMA_KUROMI_LOGO_IMAGE = require('./assets/rimma-kuromi-logo.png');
+const RIMMA_KUROMI_A_IMAGE = require('./assets/rimma-kuromi-a.png');
+const RIMMA_KUROMI_B_IMAGE = require('./assets/rimma-kuromi-b.png');
+const RIMMA_KUROMI_C_IMAGE = require('./assets/rimma-kuromi-c.png');
 const PUSH_ENABLED_STORAGE_KEY = '@appfridge_push_enabled';
 const PUSH_TOKEN_STORAGE_KEY = '@appfridge_push_token';
+const ACTIVE_PROFILE_STORAGE_KEY = '@appfridge_active_profile';
+const FAVORITE_SALADS_STORAGE_PREFIX = '@appfridge_favorite_salads';
+const FAVORITE_SALADS_COLLAPSED_PREFIX = '@appfridge_favorite_salads_collapsed';
+const SALAD_MARKET_ITEMS: Array<{ name: string; category: SaladCategory; country: 'PL' | 'UA' | 'PL/UA' }> = [
+  { name: 'Помідор', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Огірок', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Червона цибуля', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Болгарський перець', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Кукурудза', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Авокадо', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Морква', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Селера', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Броколі', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Редис', category: 'Овочі', country: 'PL/UA' },
+  { name: 'Фета', category: 'Сири', country: 'PL/UA' },
+  { name: 'Моцарела', category: 'Сири', country: 'PL/UA' },
+  { name: 'Бринза', category: 'Сири', country: 'UA' },
+  { name: 'Осципек', category: 'Сири', country: 'PL' },
+  { name: 'Пармезан', category: 'Сири', country: 'PL/UA' },
+  { name: 'Салат Ромен', category: 'Зелень', country: 'PL/UA' },
+  { name: 'Рукола', category: 'Зелень', country: 'PL/UA' },
+  { name: 'Шпинат', category: 'Зелень', country: 'PL/UA' },
+  { name: 'Кріп', category: 'Зелень', country: 'PL/UA' },
+  { name: 'Петрушка', category: 'Зелень', country: 'PL/UA' },
+  { name: 'Оливки', category: 'Додатки', country: 'PL/UA' },
+  { name: 'Гарбузове насіння', category: 'Додатки', country: 'UA' },
+  { name: 'Соняшникове насіння', category: 'Додатки', country: 'UA' },
+  { name: 'Крутони', category: 'Додатки', country: 'PL/UA' },
+  { name: 'Волоський горіх', category: 'Додатки', country: 'PL/UA' }
+];
+const SALAD_CATEGORY_TABS: SaladCategoryFilter[] = ['Усе', 'Овочі', 'Сири', 'Зелень', 'Додатки'];
+
+function saladIconForItem(name: string, category: SaladCategory): string {
+  const v = name.toLowerCase();
+  if (v.includes('помід')) return '🍅';
+  if (v.includes('огір')) return '🥒';
+  if (v.includes('перець')) return '🫑';
+  if (v.includes('цибул')) return '🧅';
+  if (v.includes('морк')) return '🥕';
+  if (v.includes('брок')) return '🥦';
+  if (v.includes('авок')) return '🥑';
+  if (v.includes('олив')) return '🫒';
+  if (v.includes('горіх')) return '🌰';
+  if (category === 'Сири') return '🧀';
+  if (category === 'Зелень') return '🌿';
+  if (category === 'Додатки') return '✨';
+  return '🥗';
+}
 
 function getTodayParts() {
   const now = new Date();
@@ -82,6 +285,20 @@ function formatShelfLifeLabel(item: InventoryResponseItem): string {
   return formatDaysLabel(item.insight.daysLeft);
 }
 
+function sortByExpiryPriority(items: InventoryResponseItem[]): InventoryResponseItem[] {
+  return [...items].sort((a, b) => {
+    const aDays = a.insight.daysLeft ?? Number.MAX_SAFE_INTEGER;
+    const bDays = b.insight.daysLeft ?? Number.MAX_SAFE_INTEGER;
+    if (aDays !== bDays) {
+      return aDays - bDays;
+    }
+    if (a.expirationDate !== b.expirationDate) {
+      return a.expirationDate.localeCompare(b.expirationDate);
+    }
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
 function inferProductCategory(name: string): ProductCategory {
   const v = name.toLowerCase();
   if (!v.trim()) return 'Інше';
@@ -108,8 +325,12 @@ function inferProductCategory(name: string): ProductCategory {
 type InventoryTileProps = {
   item: InventoryResponseItem;
   aiSelected: boolean;
+  bulkMode: boolean;
+  bulkSelected: boolean;
   onOpen: (item: InventoryResponseItem) => void;
   onToggleAi: (id: string) => void;
+  onStartBulkSelect: (id: string) => void;
+  onToggleBulkSelect: (id: string) => void;
   onSwipeMove: (item: InventoryResponseItem, to: 'fridge' | 'freezer') => void;
   onSwipeDelete: (id: string) => void;
   onSwipeActiveChange: (active: boolean) => void;
@@ -389,6 +610,95 @@ function PhotoProcessingOverlay({ visible, label, inline = false, overlayInParen
   );
 }
 
+function SaladChefLoadingOverlay({ visible }: { visible: boolean }) {
+  const knife = useRef(new Animated.Value(0)).current;
+  const boardPulse = useRef(new Animated.Value(1)).current;
+  const bitsA = useRef(new Animated.Value(0)).current;
+  const bitsB = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) {
+      knife.setValue(0);
+      boardPulse.setValue(1);
+      bitsA.setValue(0);
+      bitsB.setValue(0);
+      return;
+    }
+
+    const knifeLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(knife, { toValue: 1, duration: 340, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(knife, { toValue: 0, duration: 420, easing: Easing.inOut(Easing.cubic), useNativeDriver: true })
+      ])
+    );
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(boardPulse, { toValue: 1.04, duration: 360, useNativeDriver: true }),
+        Animated.timing(boardPulse, { toValue: 0.98, duration: 360, useNativeDriver: true })
+      ])
+    );
+    const bitsLoopA = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bitsA, { toValue: 1, duration: 520, useNativeDriver: true }),
+        Animated.timing(bitsA, { toValue: 0, duration: 0, useNativeDriver: true }),
+        Animated.delay(180)
+      ])
+    );
+    const bitsLoopB = Animated.loop(
+      Animated.sequence([
+        Animated.delay(180),
+        Animated.timing(bitsB, { toValue: 1, duration: 580, useNativeDriver: true }),
+        Animated.timing(bitsB, { toValue: 0, duration: 0, useNativeDriver: true }),
+        Animated.delay(160)
+      ])
+    );
+
+    knifeLoop.start();
+    pulseLoop.start();
+    bitsLoopA.start();
+    bitsLoopB.start();
+    return () => {
+      knifeLoop.stop();
+      pulseLoop.stop();
+      bitsLoopA.stop();
+      bitsLoopB.stop();
+    };
+  }, [visible, knife, boardPulse, bitsA, bitsB]);
+
+  if (!visible) return null;
+
+  const knifeRotate = knife.interpolate({ inputRange: [0, 1], outputRange: ['-10deg', '16deg'] });
+  const knifeY = knife.interpolate({ inputRange: [0, 1], outputRange: [0, 9] });
+  const bitsAY = bitsA.interpolate({ inputRange: [0, 1], outputRange: [5, -22] });
+  const bitsBY = bitsB.interpolate({ inputRange: [0, 1], outputRange: [6, -20] });
+  const bitsAOpacity = bitsA.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.75, 0] });
+  const bitsBOpacity = bitsB.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.72, 0] });
+  const dot1Opacity = knife.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.35, 1, 0.35] });
+  const dot2Opacity = knife.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.2, 0.5, 1] });
+  const dot3Opacity = knife.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.45, 0.2] });
+
+  return (
+    <View style={styles.saladLoadingOverlayInner}>
+      <View style={styles.saladLoadingCard}>
+        <Text style={styles.saladLoadingBadge}>Chef AI</Text>
+        <Animated.View style={[styles.saladLoadingBoard, { transform: [{ scale: boardPulse }] }]}>
+          <Text style={styles.saladLoadingVeggies}>🥬  🥒  🍅</Text>
+        </Animated.View>
+        <Animated.Text style={[styles.saladLoadingKnife, { transform: [{ translateY: knifeY }, { rotate: knifeRotate }] }]}>🔪</Animated.Text>
+        <Animated.Text style={[styles.saladLoadingBitsA, { opacity: bitsAOpacity, transform: [{ translateY: bitsAY }] }]}>✦</Animated.Text>
+        <Animated.Text style={[styles.saladLoadingBitsB, { opacity: bitsBOpacity, transform: [{ translateY: bitsBY }] }]}>✦</Animated.Text>
+        <Text style={styles.saladLoadingTitle}>Готуємо салат</Text>
+        <Text style={styles.saladLoadingText}>Шеф нарізає інгредієнти та збирає рецепт…</Text>
+        <View style={styles.saladLoadingDotsRow}>
+          <Animated.View style={[styles.saladLoadingDot, { opacity: dot1Opacity }]} />
+          <Animated.View style={[styles.saladLoadingDot, { opacity: dot2Opacity }]} />
+          <Animated.View style={[styles.saladLoadingDot, { opacity: dot3Opacity }]} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function QuantityWheel({ value, min = 1, max = 30, onChange }: QuantityWheelProps) {
   const itemHeight = 44;
   const values = useMemo(() => {
@@ -444,8 +754,12 @@ function QuantityWheel({ value, min = 1, max = 30, onChange }: QuantityWheelProp
 function InventoryTile({
   item,
   aiSelected,
+  bulkMode,
+  bulkSelected,
   onOpen,
   onToggleAi,
+  onStartBulkSelect,
+  onToggleBulkSelect,
   onSwipeMove,
   onSwipeDelete,
   onSwipeActiveChange
@@ -607,16 +921,25 @@ function InventoryTile({
     [item, onSwipeActiveChange, onSwipeDelete, onSwipeMove, translateX, translateY]
   );
 
+  function handleTilePress() {
+    if (bulkMode) {
+      onToggleBulkSelect(item.id);
+      return;
+    }
+    onOpen(item);
+  }
+
   return (
     <Animated.View
-      {...panResponder.panHandlers}
+      {...(bulkMode ? {} : panResponder.panHandlers)}
       style={[
         styles.inventoryTile,
         statusBorderStyle,
+        bulkSelected ? styles.inventoryTileSelected : undefined,
         { transform: [{ translateX }, { translateY }] }
       ]}
     >
-      <Pressable style={styles.inventoryTileTop} onPress={() => onOpen(item)}>
+      <Pressable style={styles.inventoryTileTop} onPress={handleTilePress} onLongPress={() => onStartBulkSelect(item.id)} delayLongPress={220}>
         <Text numberOfLines={2} style={styles.inventoryTileTitle}>
           {item.name}
         </Text>
@@ -626,12 +949,14 @@ function InventoryTile({
         <Text style={styles.inventoryDragHint}>
           {item.location === 'fridge' ? 'Свайп вправо → у морозилку' : 'Свайп вліво → у холодильник'} • Свайп вгору → видалити
         </Text>
-        {aiSelected ? <Text style={styles.inventoryTileAiTag}>В AI</Text> : null}
+        {bulkSelected ? <Text style={styles.inventoryTileAiTag}>Вибрано</Text> : aiSelected ? <Text style={styles.inventoryTileAiTag}>В AI</Text> : null}
       </Pressable>
 
-      <Pressable style={[styles.inventoryTileAiButton, aiSelected ? styles.inventoryTileAiButtonActive : undefined]} onPress={() => onToggleAi(item.id)}>
-        <Text style={styles.inventoryTileAiButtonText}>{aiSelected ? 'В AI' : 'Додати в AI'}</Text>
-      </Pressable>
+      {!bulkMode ? (
+        <Pressable style={[styles.inventoryTileAiButton, aiSelected ? styles.inventoryTileAiButtonActive : undefined]} onPress={() => onToggleAi(item.id)}>
+          <Text style={styles.inventoryTileAiButtonText}>{aiSelected ? 'В AI' : 'Додати в AI'}</Text>
+        </Pressable>
+      ) : null}
     </Animated.View>
   );
 }
@@ -640,6 +965,8 @@ const MemoInventoryTile = memo(
   InventoryTile,
   (prev, next) =>
     prev.aiSelected === next.aiSelected &&
+    prev.bulkMode === next.bulkMode &&
+    prev.bulkSelected === next.bulkSelected &&
     prev.item.id === next.item.id &&
     prev.item.name === next.item.name &&
     prev.item.quantity === next.item.quantity &&
@@ -672,20 +999,38 @@ export default function App() {
   const [nameCaptureBusy, setNameCaptureBusy] = useState(false);
   const [resumeManualProductAfterNameScan, setResumeManualProductAfterNameScan] = useState(false);
   const [manualProductName, setManualProductName] = useState('');
-  const [manualProductQuantity, setManualProductQuantity] = useState('1');
   const [manualProductCategory, setManualProductCategory] = useState<ProductCategory | ''>('');
   const [loading, setLoading] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [aiRecipes, setAiRecipes] = useState<RecipeSuggestion[]>([]);
+  const [expandedAiRecipeIds, setExpandedAiRecipeIds] = useState<string[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSelectedItemIds, setAiSelectedItemIds] = useState<string[]>([]);
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  const [bulkSelectedItemIds, setBulkSelectedItemIds] = useState<string[]>([]);
+  const [saladModalOpen, setSaladModalOpen] = useState(false);
+  const [saladCategoryFilter, setSaladCategoryFilter] = useState<SaladCategoryFilter>('Усе');
+  const [saladBowl, setSaladBowl] = useState<Record<string, number>>({});
+  const [saladChefOrders, setSaladChefOrders] = useState<SaladChefOrder[]>([]);
+  const [favoriteSaladsByProfile, setFavoriteSaladsByProfile] = useState<Record<ProfileOwner, SaladChefOrder[]>>({
+    vlad: [],
+    rimma: []
+  });
+  const [favoriteSaladsCollapsedByProfile, setFavoriteSaladsCollapsedByProfile] = useState<Record<ProfileOwner, boolean>>({
+    vlad: false,
+    rimma: false
+  });
+  const [saladChefLoading, setSaladChefLoading] = useState(false);
+  const [selectedSaladChefOrder, setSelectedSaladChefOrder] = useState<SaladChefOrder | null>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryResponseItem | null>(null);
   const [aiNotice, setAiNotice] = useState<string>('Порада: додайте 2-3 продукти зі строком до 7 днів, тоді AI дає найкращі рецепти.');
   const [aiNoticeTone, setAiNoticeTone] = useState<AiNoticeTone>('neutral');
   const [swipeLock, setSwipeLock] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(true);
   const [pushSettingReady, setPushSettingReady] = useState(false);
+  const [activeProfile, setActiveProfile] = useState<ProfileOwner | null>(null);
   const inventoryLoadInFlightRef = useRef(false);
+  const saladLoadingStartedAtRef = useRef(0);
   /** Ігноруємо відповіді застарілих паралельних lookup (подвійний скан / «Знайти» під час запиту). */
   const lookupGenerationRef = useRef(0);
   /** Один акт прийняття з камери: до відкриття сканера знову — блокуємо повторні onBarcodeScanned у тому ж кадрі. */
@@ -702,11 +1047,63 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadInventory();
+    (async () => {
+      const saved = await AsyncStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY);
+      if (saved === 'vlad' || saved === 'rimma') {
+        setActiveProfile(saved);
+      }
+    })();
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!activeProfile) {
+      setInventory([]);
+      return;
+    }
+    void loadInventory(activeProfile);
+  }, [activeProfile]);
+
+  useEffect(() => {
+    if (!activeProfile) {
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(`${FAVORITE_SALADS_STORAGE_PREFIX}_${activeProfile}`);
+        if (!raw) {
+          setFavoriteSaladsByProfile((current) => ({ ...current, [activeProfile]: [] }));
+          return;
+        }
+        const parsed = JSON.parse(raw) as SaladChefOrder[];
+        setFavoriteSaladsByProfile((current) => ({ ...current, [activeProfile]: Array.isArray(parsed) ? parsed : [] }));
+      } catch {
+        setFavoriteSaladsByProfile((current) => ({ ...current, [activeProfile]: [] }));
+      }
+    })();
+  }, [activeProfile]);
+
+  useEffect(() => {
+    if (!activeProfile) {
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(`${FAVORITE_SALADS_COLLAPSED_PREFIX}_${activeProfile}`);
+        setFavoriteSaladsCollapsedByProfile((current) => ({
+          ...current,
+          [activeProfile]: raw === '1'
+        }));
+      } catch {
+        setFavoriteSaladsCollapsedByProfile((current) => ({
+          ...current,
+          [activeProfile]: false
+        }));
+      }
+    })();
+  }, [activeProfile]);
 
   useEffect(() => {
     (async () => {
@@ -738,7 +1135,17 @@ export default function App() {
       const latest = inventory.find((item) => item.id === current.id);
       return latest ?? null;
     });
+    setBulkSelectedItemIds((current) => {
+      const existing = new Set(inventory.map((item) => item.id));
+      return current.filter((id) => existing.has(id));
+    });
   }, [inventory]);
+
+  useEffect(() => {
+    if (!bulkDeleteMode) {
+      setBulkSelectedItemIds([]);
+    }
+  }, [bulkDeleteMode]);
 
   async function registerPushNotifications(showAlerts = true) {
     const result = await registerForPushNotificationsAsync();
@@ -787,13 +1194,13 @@ export default function App() {
     }
   }
 
-  async function loadInventory() {
+  async function loadInventory(owner: ProfileOwner) {
     if (inventoryLoadInFlightRef.current) {
       return;
     }
     inventoryLoadInFlightRef.current = true;
     try {
-      const items = await fetchInventory();
+      const items = await fetchInventory(owner);
       setInventory(items);
     } catch {
       Alert.alert('Бекенд недоступний', 'Запустіть сервер перед перевіркою мобільного застосунку.');
@@ -830,7 +1237,6 @@ export default function App() {
       }
 
       setManualProductName(resolvedName);
-      setManualProductQuantity('1');
       setManualProductCategory((product.category as ProductCategory) ?? inferProductCategory(resolvedName));
       setManualProductModalOpen(true);
     } catch {
@@ -841,7 +1247,6 @@ export default function App() {
       setProductCategory('');
       setProductNote('');
       setManualProductName('');
-      setManualProductQuantity('1');
       setManualProductCategory('Інше');
       setManualProductModalOpen(true);
     } finally {
@@ -902,11 +1307,9 @@ export default function App() {
       Alert.alert('Назва потрібна', 'Введіть назву продукту.');
       return;
     }
-    const nextQty = Math.max(1, Number(manualProductQuantity) || 1);
     const autoCategory = manualProductCategory || inferProductCategory(name);
     setProductName(name);
     setProductCategory(autoCategory);
-    setQuantity(String(nextQty));
     setManualProductModalOpen(false);
     void requestExpiryCamera();
   }
@@ -1025,7 +1428,10 @@ export default function App() {
     }
 
     try {
-      const created = await addInventoryItem({
+      if (!activeProfile) {
+        return;
+      }
+      const created = await addInventoryItem(activeProfile, {
         barcode,
         name: productName,
         expirationDate: normalizedExpirationDate,
@@ -1056,7 +1462,10 @@ export default function App() {
 
   async function handleDeleteItem(id: string) {
     try {
-      await removeInventoryItem(id);
+      if (!activeProfile) {
+        return;
+      }
+      await removeInventoryItem(activeProfile, id);
       animateListTransition();
       setInventory((current) => current.filter((item) => item.id !== id));
       setSelectedInventoryItem((current) => (current?.id === id ? null : current));
@@ -1074,6 +1483,13 @@ export default function App() {
     setManualDateModalOpen(false);
     setTimeout(() => {
       setExpiryCameraOpen(true);
+    }, 60);
+  }
+
+  function backFromExpiryCameraStep() {
+    setExpiryCameraOpen(false);
+    setTimeout(() => {
+      void requestScanner();
     }, 60);
   }
 
@@ -1112,6 +1528,155 @@ export default function App() {
     setAiSelectedItemIds((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
   }
 
+  function startBulkSelection(id: string) {
+    setBulkDeleteMode(true);
+    setBulkSelectedItemIds((current) => (current.includes(id) ? current : [...current, id]));
+  }
+
+  function toggleBulkSelection(id: string) {
+    setBulkSelectedItemIds((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
+  }
+
+  async function handleBulkDelete() {
+    if (bulkSelectedItemIds.length === 0) {
+      setBulkDeleteMode(false);
+      return;
+    }
+
+    const idsToDelete = [...bulkSelectedItemIds];
+    if (!activeProfile) {
+      return;
+    }
+    const results = await Promise.allSettled(idsToDelete.map((id) => removeInventoryItem(activeProfile, id)));
+    const deletedIds = idsToDelete.filter((_, index) => results[index].status === 'fulfilled');
+    const failedCount = idsToDelete.length - deletedIds.length;
+
+    if (deletedIds.length > 0) {
+      animateListTransition();
+      setInventory((current) => current.filter((item) => !deletedIds.includes(item.id)));
+      setSelectedInventoryItem((current) => (current && deletedIds.includes(current.id) ? null : current));
+    }
+
+    setBulkDeleteMode(false);
+    setBulkSelectedItemIds([]);
+
+    if (failedCount > 0) {
+      Alert.alert('Частково видалено', `Видалено ${deletedIds.length}. Не вдалося видалити: ${failedCount}.`);
+    }
+  }
+
+  function requestBulkDelete() {
+    if (bulkSelectedItemIds.length === 0) {
+      Alert.alert('Немає вибору', 'Спочатку виберіть продукти для видалення.');
+      return;
+    }
+    Alert.alert(
+      'Видалити вибрані?',
+      `Видалити ${bulkSelectedItemIds.length} продукт(и)?`,
+      [
+        { text: 'Скасувати', style: 'cancel' },
+        {
+          text: 'Видалити',
+          style: 'destructive',
+          onPress: () => {
+            void handleBulkDelete();
+          }
+        }
+      ]
+    );
+  }
+
+  function addToSaladBowl(name: string) {
+    setSaladBowl((current) => ({ ...current, [name]: (current[name] ?? 0) + 1 }));
+  }
+
+  function removeFromSaladBowl(name: string) {
+    setSaladBowl((current) => {
+      const next = { ...current };
+      const value = (next[name] ?? 0) - 1;
+      if (value <= 0) {
+        delete next[name];
+      } else {
+        next[name] = value;
+      }
+      return next;
+    });
+  }
+
+  function toggleFavoriteSalad(order: SaladChefOrder) {
+    if (!activeProfile) {
+      return;
+    }
+    const storageKey = `${FAVORITE_SALADS_STORAGE_PREFIX}_${activeProfile}`;
+    setFavoriteSaladsByProfile((current) => {
+      const currentList = current[activeProfile] ?? [];
+      const exists = currentList.some((salad) => salad.id === order.id);
+      const nextList = exists ? currentList.filter((salad) => salad.id !== order.id) : [...currentList, order];
+      void AsyncStorage.setItem(storageKey, JSON.stringify(nextList));
+      return {
+        ...current,
+        [activeProfile]: nextList
+      };
+    });
+  }
+
+  function toggleFavoriteSaladsCollapsed() {
+    if (!activeProfile) {
+      return;
+    }
+    const storageKey = `${FAVORITE_SALADS_COLLAPSED_PREFIX}_${activeProfile}`;
+    setFavoriteSaladsCollapsedByProfile((current) => {
+      const next = !Boolean(current[activeProfile]);
+      void AsyncStorage.setItem(storageKey, next ? '1' : '0');
+      return {
+        ...current,
+        [activeProfile]: next
+      };
+    });
+  }
+
+  const saladBowlEntries = useMemo(() => Object.entries(saladBowl).filter(([, qty]) => qty > 0), [saladBowl]);
+  const saladTotalItems = useMemo(() => saladBowlEntries.reduce((sum, [, qty]) => sum + qty, 0), [saladBowlEntries]);
+  const saladVisibleItems = useMemo(
+    () =>
+      SALAD_MARKET_ITEMS.filter((item) => (saladCategoryFilter === 'Усе' ? true : item.category === saladCategoryFilter)),
+    [saladCategoryFilter]
+  );
+  const favoriteSalads = activeProfile ? favoriteSaladsByProfile[activeProfile] ?? [] : [];
+  const favoriteSaladIds = useMemo(() => new Set(favoriteSalads.map((salad) => salad.id)), [favoriteSalads]);
+  const favoriteSaladsCollapsed = activeProfile ? Boolean(favoriteSaladsCollapsedByProfile[activeProfile]) : false;
+
+  async function generateSaladChefOrders() {
+    if (saladChefLoading) {
+      return;
+    }
+    if (saladBowlEntries.length === 0) {
+      Alert.alert('Порожня тарілочка', 'Додайте інгредієнти перед генерацією салатів.');
+      return;
+    }
+    setSaladModalOpen(false);
+    saladLoadingStartedAtRef.current = Date.now();
+    setSaladChefLoading(true);
+    try {
+      const orders = await fetchSaladChefOrders({
+        ingredients: saladBowlEntries.map(([name, quantity]) => ({ name, quantity }))
+      });
+      setSaladChefOrders(orders.slice(0, 2));
+      if (orders.length === 0) {
+        Alert.alert('Немає варіантів', 'AI не повернув салати. Спробуйте інший набір.');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Не вдалося згенерувати салати.';
+      Alert.alert('Помилка AI', msg);
+    } finally {
+      const elapsed = Date.now() - saladLoadingStartedAtRef.current;
+      if (elapsed < 900) {
+        await new Promise((resolve) => setTimeout(resolve, 900 - elapsed));
+      }
+      setSaladChefLoading(false);
+    }
+  }
+
   async function patchItem(id: string, patch: { location?: LocationType }, options?: { optimistic?: boolean }) {
     const prevItem = inventory.find((item) => item.id === id);
     if (!prevItem) {
@@ -1130,7 +1695,10 @@ export default function App() {
     }
 
     try {
-      const { item: updated, mergedRemovedId } = await updateInventoryItem(id, patch);
+      if (!activeProfile) {
+        return;
+      }
+      const { item: updated, mergedRemovedId } = await updateInventoryItem(activeProfile, id, patch);
       animateListTransition();
       setInventory((current) => {
         const mapped = current.map((item) => (item.id === id ? updated : item));
@@ -1165,8 +1733,12 @@ export default function App() {
     setAiNotice('Генеруємо AI-рецепти...');
     setAiNoticeTone('neutral');
     try {
-      const next = await fetchAiRecipes(aiSelectedItemIds);
+      if (!activeProfile) {
+        return;
+      }
+      const next = await fetchAiRecipes(activeProfile, aiSelectedItemIds);
       setAiRecipes(next);
+      setExpandedAiRecipeIds([]);
       setAiSelectedItemIds([]);
       if (next.length === 0) {
         setAiNotice('AI не повернув рецептів. Спробуйте додати більше продуктів або уточнити дати придатності.');
@@ -1224,13 +1796,85 @@ export default function App() {
     );
   }, [inventory]);
 
-  const fridgeItems = useMemo(() => inventory.filter((item) => item.location === 'fridge'), [inventory]);
-  const freezerItems = useMemo(() => inventory.filter((item) => item.location === 'freezer'), [inventory]);
+  const fridgeItems = useMemo(() => sortByExpiryPriority(inventory.filter((item) => item.location === 'fridge')), [inventory]);
+  const freezerItems = useMemo(() => sortByExpiryPriority(inventory.filter((item) => item.location === 'freezer')), [inventory]);
+
+  async function selectProfile(owner: ProfileOwner) {
+    setActiveProfile(owner);
+    await AsyncStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, owner);
+  }
+
+  async function switchProfile() {
+    setActiveProfile(null);
+    setInventory([]);
+    setAiRecipes([]);
+    setAiSelectedItemIds([]);
+    setBulkDeleteMode(false);
+    setBulkSelectedItemIds([]);
+    await AsyncStorage.removeItem(ACTIVE_PROFILE_STORAGE_KEY);
+  }
+
+  function requestSwitchProfile() {
+    Alert.alert('Повернутися до вибору профілю?', 'Ви вийдете з поточного профілю і повернетеся на головний вибір.', [
+      { text: 'Скасувати', style: 'cancel' },
+      {
+        text: 'Повернутися',
+        style: 'destructive',
+        onPress: () => {
+          void switchProfile();
+        }
+      }
+    ]);
+  }
+
+  if (!activeProfile) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar style="light" />
+        <Image source={{ uri: KUROMI_BG_IMAGE_URI }} resizeMode="cover" style={styles.kuromiBackdropImage} />
+        <TwinkleStarsDecor />
+        <View pointerEvents="none" style={styles.kuromiBackdropOverlay} />
+        <View style={[styles.content, { justifyContent: 'center', flexGrow: 1 }]}>
+          <View style={styles.hero}>
+            <ProfileWaterfallDecor />
+            <View style={styles.profilePickerContent}>
+            <Text style={styles.eyebrow}>AppFridge</Text>
+            <Text style={styles.title}>Оберіть профіль</Text>
+            <Text style={styles.subtitle}>У кожного профілю буде окремий список продуктів і своя історія.</Text>
+            <View style={styles.profilePickerGrid}>
+              <Pressable style={styles.profileCard} onPress={() => void selectProfile('vlad')}>
+                <Image source={VLAD_PROFILE_IMAGE} resizeMode="cover" style={styles.profileCardAvatar} />
+                <Text style={styles.profileCardName}>Влад</Text>
+              </Pressable>
+              <Pressable style={styles.profileCard} onPress={() => void selectProfile('rimma')}>
+                <Image source={RIMMA_PROFILE_IMAGE} resizeMode="cover" style={styles.profileCardAvatar} />
+                <Text style={styles.profileCardName}>Римма</Text>
+              </Pressable>
+            </View>
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
       <Image source={{ uri: KUROMI_BG_IMAGE_URI }} resizeMode="cover" style={styles.kuromiBackdropImage} />
+      <TwinkleStarsDecor />
       <View pointerEvents="none" style={styles.kuromiBackdropOverlay} />
+      {activeProfile === 'rimma' ? (
+        <View pointerEvents="none" style={styles.rimmaBackdropDecorLayer}>
+          <Image source={RIMMA_KUROMI_A_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorA]} />
+          <Image source={RIMMA_KUROMI_B_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorB]} />
+          <Image source={RIMMA_KUROMI_C_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorC]} />
+          <Image source={RIMMA_KUROMI_LOGO_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorD]} />
+          <Image source={RIMMA_KUROMI_B_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorE]} />
+          <Image source={RIMMA_KUROMI_A_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorF]} />
+          <Image source={RIMMA_KUROMI_C_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorG]} />
+          <Image source={RIMMA_KUROMI_LOGO_IMAGE} resizeMode="contain" style={[styles.rimmaDecorSticker, styles.rimmaDecorH]} />
+        </View>
+      ) : null}
       <View pointerEvents="none" style={styles.kuromiDecorWrap}>
         <Text style={styles.kuromiDecorTop}>☠️🖤✨</Text>
         <Text style={styles.kuromiDecorBottom}>KUROMI VIBE</Text>
@@ -1239,14 +1883,18 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.content} scrollEnabled={!swipeLock}>
         <View style={styles.hero}>
           <View style={styles.heroHeaderRow}>
-            <Image source={{ uri: KUROMI_TITLE_IMAGE_URI }} resizeMode="cover" style={styles.heroBadgeImage} />
+            <Image
+              source={activeProfile === 'rimma' ? RIMMA_PROFILE_IMAGE : VLAD_PROFILE_IMAGE}
+              resizeMode="cover"
+              style={styles.heroBadgeImage}
+            />
             <View style={styles.heroHeaderTexts}>
               <Text style={styles.eyebrow}>AppFridge</Text>
-              <Text style={styles.title}>Розумний холодильник за штрихкодом</Text>
+              <Text style={styles.title}>{activeProfile === 'vlad' ? 'Влад' : 'Римма'} • Розумний холодильник</Text>
             </View>
           </View>
           <Text style={styles.subtitle}>
-            Звичайний штрихкод зазвичай визначає сам товар, але не містить дату придатності. Тому дату ви вводите вручну, а застосунок стежить за строками та надсилає нагадування.
+            Скануйте товар, додайте дату придатності, а AppFridge нагадає, що потрібно використати першочергово.
           </Text>
           <View style={styles.statRow}>
             <View style={styles.statCard}>
@@ -1262,16 +1910,39 @@ export default function App() {
               <Text style={styles.statValue}>{summary.expired}</Text>
             </View>
           </View>
+          <Pressable style={[styles.aiClearButton, { marginTop: 10 }]} onPress={requestSwitchProfile}>
+            <Text style={styles.aiClearButtonText}>Змінити профіль</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Як користуватись</Text>
+          <View style={styles.quickStepRow}>
+            <Text style={styles.quickStepBadge}>1</Text>
+            <Text style={styles.quickStepText}>Натисніть `Відкрити сканер` і відскануйте штрихкод.</Text>
+          </View>
+          <View style={styles.quickStepRow}>
+            <Text style={styles.quickStepBadge}>2</Text>
+            <Text style={styles.quickStepText}>Підтвердіть дату придатності (камера або вручну).</Text>
+          </View>
+          <View style={styles.quickStepRow}>
+            <Text style={styles.quickStepBadge}>3</Text>
+            <Text style={styles.quickStepText}>Оберіть місце зберігання і збережіть продукт.</Text>
+          </View>
+          <View style={styles.quickStepRow}>
+            <Text style={styles.quickStepBadge}>4</Text>
+            <Text style={styles.quickStepText}>За потреби виберіть продукти і отримайте AI-рецепти.</Text>
+          </View>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Додати продукт</Text>
           <Text style={styles.sectionText}>
-            Один потік: скануєте штрихкод → якщо товар знайдено, одразу фото дати; якщо ні, вводите назву та кількість → фото дати → вибір місця → збереження.
+            Один простий потік: скан товару → дата → місце зберігання → готово.
           </Text>
 
           <Pressable style={styles.button} onPress={requestScanner}>
-            <Text style={styles.buttonText}>Відкрити сканер</Text>
+            <Text style={styles.buttonText}>Відкрити сканер продукту</Text>
           </Pressable>
         </View>
 
@@ -1291,11 +1962,34 @@ export default function App() {
               thumbColor={pushEnabled ? '#7e22ce' : '#ded2f5'}
             />
           </View>
+          <Pressable style={[styles.button, styles.buttonSecondary, { marginTop: 12 }]} onPress={requestSwitchProfile}>
+            <Text style={styles.buttonTextLight}>Повернутися до вибору профілю</Text>
+          </Pressable>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Продукти</Text>
-          <Text style={styles.sectionText}>Позиції розділені за місцем зберігання.</Text>
+          <Text style={styles.sectionText}>Позиції розділені за місцем зберігання. Свайп вліво/вправо переносить між секціями.</Text>
+          <View style={styles.statusLegendRow}>
+            <Text style={styles.statusLegendText}>🟢 Свіжий</Text>
+            <Text style={styles.statusLegendText}>🟡 Скоро</Text>
+            <Text style={styles.statusLegendText}>🔴 Прострочено</Text>
+          </View>
+          {bulkDeleteMode ? (
+            <View style={styles.bulkActionsRow}>
+              <Text style={styles.bulkActionsText}>Вибрано: {bulkSelectedItemIds.length}</Text>
+              <View style={styles.bulkActionsButtons}>
+                <Pressable style={[styles.inventoryTileAiButton, styles.bulkCancelButton]} onPress={() => setBulkDeleteMode(false)}>
+                  <Text style={styles.inventoryTileAiButtonText}>Скасувати</Text>
+                </Pressable>
+                <Pressable style={[styles.inventoryTileAiButton, styles.bulkDeleteButton]} onPress={requestBulkDelete}>
+                  <Text style={styles.inventoryTileAiButtonText}>Видалити</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Text style={styles.scannerHint}>Затисніть картку, щоб вибрати кілька продуктів для видалення.</Text>
+          )}
 
           <View>
             <View style={styles.inventoryGroupHeader}>
@@ -1311,8 +2005,12 @@ export default function App() {
                   key={item.id}
                 item={item}
                 aiSelected={aiSelectedItemIds.includes(item.id)}
+                bulkMode={bulkDeleteMode}
+                bulkSelected={bulkSelectedItemIds.includes(item.id)}
                 onOpen={setSelectedInventoryItem}
                 onToggleAi={toggleAiItemSelection}
+                onStartBulkSelect={startBulkSelection}
+                onToggleBulkSelect={toggleBulkSelection}
                 onSwipeMove={(x, to) => void handleMove(x, to)}
                 onSwipeDelete={requestDeleteItem}
                 onSwipeActiveChange={setSwipeLock}
@@ -1335,8 +2033,12 @@ export default function App() {
                   key={item.id}
                 item={item}
                 aiSelected={aiSelectedItemIds.includes(item.id)}
+                bulkMode={bulkDeleteMode}
+                bulkSelected={bulkSelectedItemIds.includes(item.id)}
                 onOpen={setSelectedInventoryItem}
                 onToggleAi={toggleAiItemSelection}
+                onStartBulkSelect={startBulkSelection}
+                onToggleBulkSelect={toggleBulkSelection}
                 onSwipeMove={(x, to) => void handleMove(x, to)}
                 onSwipeDelete={requestDeleteItem}
                 onSwipeActiveChange={setSwipeLock}
@@ -1344,51 +2046,123 @@ export default function App() {
             ))}
           </View>
           </View>
+
+          <View style={{ marginTop: 16 }}>
+            <Text style={styles.sectionTitle}>AI для продуктів</Text>
+            <Text style={styles.sectionText}>
+              Виберіть потрібні продукти на картках кнопкою `Додати в AI`, і ми згенеруємо рецепти саме для них.
+            </Text>
+            <Text style={styles.aiSelectionText}>
+              {aiSelectedItemIds.length > 0
+                ? `Вибрано ${aiSelectedItemIds.length} продукт(и) для AI.`
+                : 'Якщо нічого не вибрано, AI використає весь список продуктів.'}
+            </Text>
+            {aiSelectedItemIds.length > 0 ? (
+              <Pressable style={styles.aiClearButton} onPress={() => setAiSelectedItemIds([])}>
+                <Text style={styles.aiClearButtonText}>Очистити вибір</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void handleAiRecipes()} disabled={aiLoading}>
+              <Text style={styles.buttonTextLight}>{aiLoading ? 'Генеруємо…' : 'Отримати AI-рецепти'}</Text>
+            </Pressable>
+            <Text
+              style={[
+                styles.aiNotice,
+                aiNoticeTone === 'error' ? styles.aiNoticeError : undefined,
+                aiNoticeTone === 'ok' ? styles.aiNoticeOk : undefined
+              ]}
+            >
+              {aiNotice}
+            </Text>
+
+            {aiRecipes.map((recipe) => (
+              <View key={recipe.id} style={styles.card}>
+                <Text style={styles.recipeBadge}>AI</Text>
+                <View style={styles.recipeHeaderRow}>
+                  <Text style={styles.recipeTitle}>{recipe.title}</Text>
+                  <Pressable
+                    style={styles.recipeChevronButton}
+                    onPress={() =>
+                      setExpandedAiRecipeIds((current) =>
+                        current.includes(recipe.id) ? current.filter((id) => id !== recipe.id) : [...current, recipe.id]
+                      )
+                    }
+                  >
+                    <Text style={styles.recipeChevronText}>{expandedAiRecipeIds.includes(recipe.id) ? '▾' : '▸'}</Text>
+                  </Pressable>
+                </View>
+                {expandedAiRecipeIds.includes(recipe.id) ? (
+                  <>
+                    <Text style={styles.recipeBody}>{recipe.description}</Text>
+                    {recipe.ingredients.length > 0 ? (
+                      <Text style={[styles.recipeBody, { marginTop: 8 }]}>Інгредієнти: {recipe.ingredients.join(', ')}</Text>
+                    ) : null}
+                    {recipe.steps.map((step, index) => (
+                      <Text key={`${recipe.id}-step-${index}`} style={styles.recipeSteps}>
+                        {index + 1}. {step}
+                      </Text>
+                    ))}
+                  </>
+                ) : null}
+              </View>
+            ))}
+          </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>AI помічник</Text>
-          <Text style={styles.sectionText}>
-            Генерує 1-3 рецепти з продуктів, у яких термін найкритичніший. Якщо ключ невалідний або сервер недоступний, підказка зʼявиться нижче без спливаючих помилок.
+        <View style={[styles.section, styles.saladSection]}>
+          <Text style={styles.sectionTitle}>САЛАТИК МММ...</Text>
+          <Text style={[styles.sectionText, styles.saladSectionText]}>
+            Окрема лавка з популярними інгредієнтами, які легко купити в Польщі та Україні. Натисніть кнопку й зберіть салат у тарілочку.
           </Text>
-          <Text style={styles.aiSelectionText}>
-            {aiSelectedItemIds.length > 0
-              ? `Вибрано ${aiSelectedItemIds.length} продукт(и) для AI.`
-              : 'Якщо нічого не вибрано, AI використає весь список продуктів.'}
-          </Text>
-          {aiSelectedItemIds.length > 0 ? (
-            <Pressable style={styles.aiClearButton} onPress={() => setAiSelectedItemIds([])}>
-              <Text style={styles.aiClearButtonText}>Очистити вибір</Text>
-            </Pressable>
-          ) : null}
-          <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void handleAiRecipes()} disabled={aiLoading}>
-            <Text style={styles.buttonTextLight}>{aiLoading ? 'Генеруємо…' : 'Отримати AI-рецепти'}</Text>
+          <Pressable style={[styles.button, styles.saladOpenButton]} onPress={() => setSaladModalOpen(true)}>
+            <Text style={styles.buttonText}>Відкрити САЛАТИК МММ...</Text>
           </Pressable>
-          <Text
-            style={[
-              styles.aiNotice,
-              aiNoticeTone === 'error' ? styles.aiNoticeError : undefined,
-              aiNoticeTone === 'ok' ? styles.aiNoticeOk : undefined
-            ]}
-          >
-            {aiNotice}
-          </Text>
-
-          {aiRecipes.map((recipe) => (
-            <View key={recipe.id} style={styles.card}>
-              <Text style={styles.recipeBadge}>AI</Text>
-              <Text style={styles.recipeTitle}>{recipe.title}</Text>
-              <Text style={styles.recipeBody}>{recipe.description}</Text>
-              {recipe.ingredients.length > 0 ? (
-                <Text style={[styles.recipeBody, { marginTop: 8 }]}>Інгредієнти: {recipe.ingredients.join(', ')}</Text>
-              ) : null}
-              {recipe.steps.map((step, index) => (
-                <Text key={`${recipe.id}-step-${index}`} style={styles.recipeSteps}>
-                  {index + 1}. {step}
-                </Text>
+          {saladChefOrders.length > 0 ? (
+            <View style={styles.saladOrdersWrap}>
+              <Text style={styles.saladOrdersTitle}>Замовлення для шефа</Text>
+              {saladChefOrders.map((order) => (
+                <Pressable key={order.id} style={styles.saladOrderCard} onPress={() => setSelectedSaladChefOrder(order)}>
+                  <View style={styles.saladOrderTopRow}>
+                    <Text style={styles.saladOrderName} numberOfLines={2}>
+                      {order.title}
+                    </Text>
+                    <Pressable
+                      style={[styles.saladFavoriteButton, favoriteSaladIds.has(order.id) ? styles.saladFavoriteButtonActive : undefined]}
+                      onPress={() => toggleFavoriteSalad(order)}
+                    >
+                      <Text style={styles.saladFavoriteButtonText}>{favoriteSaladIds.has(order.id) ? '♥' : '♡'}</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.saladOrderDesc}>{order.description}</Text>
+                  <Text style={styles.saladOrderMeta}>Інгредієнти: {order.ingredients.join(', ')}</Text>
+                </Pressable>
               ))}
             </View>
-          ))}
+          ) : null}
+          {favoriteSalads.length > 0 ? (
+            <View style={styles.saladOrdersWrap}>
+              <Pressable style={styles.saladFavoritesHeader} onPress={toggleFavoriteSaladsCollapsed}>
+                <Text style={styles.saladOrdersTitle}>Улюблені салати ({favoriteSalads.length})</Text>
+                <Text style={styles.saladFavoritesChevron}>{favoriteSaladsCollapsed ? '▸' : '▾'}</Text>
+              </Pressable>
+              {!favoriteSaladsCollapsed
+                ? favoriteSalads.map((order) => (
+                    <Pressable key={`fav-${order.id}`} style={styles.saladOrderCard} onPress={() => setSelectedSaladChefOrder(order)}>
+                      <View style={styles.saladOrderTopRow}>
+                        <Text style={styles.saladOrderName} numberOfLines={2}>
+                          {order.title}
+                        </Text>
+                        <Pressable style={[styles.saladFavoriteButton, styles.saladFavoriteButtonActive]} onPress={() => toggleFavoriteSalad(order)}>
+                          <Text style={styles.saladFavoriteButtonText}>♥</Text>
+                        </Pressable>
+                      </View>
+                      <Text style={styles.saladOrderDesc}>{order.description}</Text>
+                      <Text style={styles.saladOrderMeta}>Інгредієнти: {order.ingredients.join(', ')}</Text>
+                    </Pressable>
+                  ))
+                : null}
+            </View>
+          ) : null}
         </View>
 
       </ScrollView>
@@ -1412,15 +2186,6 @@ export default function App() {
             <Pressable style={[styles.button, styles.buttonSecondary]} onPress={() => void requestNameCamera()} disabled={nameCaptureBusy}>
               <Text style={styles.buttonTextLight}>{nameCaptureBusy ? 'Зчитуємо…' : 'Сканувати назву з фото'}</Text>
             </Pressable>
-            <TextInput
-              style={styles.input}
-              placeholder="Кількість"
-              placeholderTextColor="#7f95a3"
-              value={manualProductQuantity}
-              onChangeText={(value) => setManualProductQuantity(value.replace(/\D/g, '').slice(0, 3))}
-              keyboardType="numeric"
-              maxLength={3}
-            />
             <Pressable style={[styles.button, styles.buttonSecondary]} onPress={confirmManualProductEntry}>
               <Text style={styles.buttonTextLight}>Далі: скан дати</Text>
             </Pressable>
@@ -1483,7 +2248,7 @@ export default function App() {
         </View>
       </Modal>
 
-      <Modal visible={expiryCameraOpen} transparent animationType="fade" onRequestClose={() => setExpiryCameraOpen(false)}>
+      <Modal visible={expiryCameraOpen} transparent animationType="fade" onRequestClose={backFromExpiryCameraStep}>
         <View style={styles.detailOverlay}>
           <View style={styles.detailCard}>
             <Text style={styles.sectionTitle}>Скан дати придатності</Text>
@@ -1507,8 +2272,8 @@ export default function App() {
             >
               <Text style={styles.buttonTextLight}>Ввести дату вручну</Text>
             </Pressable>
-            <Pressable style={styles.detailCloseButton} onPress={() => setExpiryCameraOpen(false)}>
-              <Text style={styles.detailCloseText}>Закрити</Text>
+            <Pressable style={styles.detailCloseButton} onPress={backFromExpiryCameraStep}>
+              <Text style={styles.detailCloseText}>Скасувати</Text>
             </Pressable>
           </View>
         </View>
@@ -1637,6 +2402,105 @@ export default function App() {
               </>
             ) : null}
             <Pressable style={styles.detailCloseButton} onPress={() => setSelectedInventoryItem(null)}>
+              <Text style={styles.detailCloseText}>Закрити</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={saladModalOpen} transparent animationType="fade" onRequestClose={() => setSaladModalOpen(false)}>
+        <View style={styles.detailOverlay}>
+          <View style={[styles.detailCard, styles.saladModalCard]}>
+            <Text style={styles.sectionTitle}>САЛАТИК МММ...</Text>
+            <Text style={styles.sectionText}>Лавка інгредієнтів (PL/UA): додавайте в тарілочку нижче.</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.saladTabsRow}>
+              {SALAD_CATEGORY_TABS.map((tab) => (
+                <Pressable
+                  key={tab}
+                  style={[styles.saladTabChip, saladCategoryFilter === tab ? styles.saladTabChipActive : undefined]}
+                  onPress={() => setSaladCategoryFilter(tab)}
+                >
+                  <Text style={[styles.saladTabChipText, saladCategoryFilter === tab ? styles.saladTabChipTextActive : undefined]}>{tab}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <ScrollView style={styles.saladList} contentContainerStyle={styles.saladListContent}>
+              {saladVisibleItems.map((item) => (
+                <View key={item.name} style={styles.saladItemRow}>
+                  <View style={styles.saladItemInfo}>
+                    <Text style={styles.saladItemName}>{saladIconForItem(item.name, item.category)} {item.name}</Text>
+                    <View style={styles.saladItemMetaRow}>
+                      <Text style={styles.saladItemMeta}>{item.category}</Text>
+                      <Text style={styles.saladCountryBadge}>{item.country}</Text>
+                    </View>
+                  </View>
+                  <Pressable style={styles.saladAddButton} onPress={() => addToSaladBowl(item.name)}>
+                    <Text style={styles.saladAddButtonText}>Додати</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+
+            <View style={styles.saladBowlBox}>
+              <Text style={styles.saladBowlTitle}>Тарілочка ({saladTotalItems})</Text>
+              {saladBowlEntries.length === 0 ? (
+                <Text style={styles.saladBowlEmpty}>Поки порожньо. Додайте інгредієнти з лавки.</Text>
+              ) : (
+                <ScrollView style={styles.saladBowlScroll} showsVerticalScrollIndicator={false}>
+                  {saladBowlEntries.map(([name, qty]) => (
+                    <View key={name} style={styles.saladBowlRow}>
+                      <Text style={styles.saladBowlItem}>{name} × {qty}</Text>
+                      <Pressable style={styles.saladRemoveButton} onPress={() => removeFromSaladBowl(name)}>
+                        <Text style={styles.saladRemoveButtonText}>-1</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+            <View style={styles.bulkActionsButtons}>
+              <Pressable style={[styles.inventoryTileAiButton, styles.bulkCancelButton]} onPress={() => setSaladBowl({})}>
+                <Text style={styles.inventoryTileAiButtonText}>Очистити тарілочку</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.inventoryTileAiButton, styles.saladDoneButton, saladChefLoading ? styles.actionButtonDisabled : undefined]}
+                onPress={() => void generateSaladChefOrders()}
+                disabled={saladChefLoading}
+              >
+                <Text style={styles.inventoryTileAiButtonText}>{saladChefLoading ? 'Готуємо…' : 'Замовити шефу'}</Text>
+              </Pressable>
+              <Pressable style={[styles.inventoryTileAiButton, styles.saladDoneButton]} onPress={() => setSaladModalOpen(false)}>
+                <Text style={styles.inventoryTileAiButtonText}>Готово</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={saladChefLoading} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.saladLoadingFullscreenOverlay}>
+          <View style={[styles.processingCard, styles.saladLoadingFullscreenCard]}>
+            <SaladChefLoadingOverlay visible={saladChefLoading} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={Boolean(selectedSaladChefOrder)} transparent animationType="fade" onRequestClose={() => setSelectedSaladChefOrder(null)}>
+        <View style={styles.detailOverlay}>
+          <View style={[styles.detailCard, styles.saladRecipeDetailCard]}>
+            {selectedSaladChefOrder ? (
+              <ScrollView style={styles.saladRecipeScroll} contentContainerStyle={styles.saladRecipeScrollContent}>
+                <Text style={styles.detailTitle}>{selectedSaladChefOrder.title}</Text>
+                <Text style={styles.detailLine}>{selectedSaladChefOrder.description}</Text>
+                <Text style={[styles.detailLine, { marginTop: 8 }]}>Інгредієнти: {selectedSaladChefOrder.ingredients.join(', ')}</Text>
+                {selectedSaladChefOrder.steps.map((step, index) => (
+                  <Text key={`${selectedSaladChefOrder.id}-step-${index}`} style={styles.recipeSteps}>
+                    {index + 1}. {step}
+                  </Text>
+                ))}
+              </ScrollView>
+            ) : null}
+            <Pressable style={styles.detailCloseButton} onPress={() => setSelectedSaladChefOrder(null)}>
               <Text style={styles.detailCloseText}>Закрити</Text>
             </Pressable>
           </View>

@@ -188,6 +188,13 @@ export type ParsedProductName = {
   confidence: number;
   rawText: string | null;
 };
+export type SaladChefOrder = {
+  id: string;
+  title: string;
+  description: string;
+  ingredients: string[];
+  steps: string[];
+};
 
 function isUrgency(value: unknown): value is RecipeSuggestion['urgency'] {
   return value === 'high' || value === 'medium';
@@ -236,6 +243,33 @@ function normalizeRecipes(raw: unknown): RecipeSuggestion[] {
   }
 
   return out.slice(0, 5);
+}
+
+function normalizeSaladOrders(raw: unknown): SaladChefOrder[] {
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+  const salads = (raw as { salads?: unknown }).salads;
+  if (!Array.isArray(salads)) {
+    return [];
+  }
+  const out: SaladChefOrder[] = [];
+  for (let i = 0; i < salads.length; i += 1) {
+    const s = salads[i] as { name?: unknown; summary?: unknown; ingredients?: unknown; steps?: unknown };
+    if (!s || typeof s !== 'object' || typeof s.name !== 'string' || typeof s.summary !== 'string') {
+      continue;
+    }
+    const ingredients = Array.isArray(s.ingredients) ? s.ingredients.filter((x): x is string => typeof x === 'string') : [];
+    const steps = Array.isArray(s.steps) ? s.steps.filter((x): x is string => typeof x === 'string') : [];
+    out.push({
+      id: `salad-${i}-${crypto.randomUUID().slice(0, 8)}`,
+      title: s.name.trim(),
+      description: s.summary.trim(),
+      ingredients: ingredients.map((x) => x.trim()).filter(Boolean),
+      steps: steps.map((x) => x.trim()).filter(Boolean)
+    });
+  }
+  return out.slice(0, 2);
 }
 
 function extractJsonString(raw: string): string {
@@ -307,6 +341,7 @@ async function requestOpenAiChat(params: {
   model: string;
   userBody: unknown;
   includeResponseFormat: boolean;
+  systemContent?: string;
 }): Promise<UpstreamSuccess | UpstreamError> {
   const endpoint = resolveOpenAiUrl();
   const timeoutMs = resolveTimeoutMs();
@@ -328,15 +363,17 @@ async function requestOpenAiChat(params: {
         messages: [
           {
             role: 'system',
-            content: [
-              'Ти кулінарний помічник українського застосунку AppFridge.',
-              'У JSON від користувача є primary_use (термін критичний або закінчився) та secondary_optional (свіжіше).',
-              'Обов’язково: основні страви будуй навколо primary_use — назви конкретні продукти з цього списку в інгредієнтах або описі.',
-              'secondary_optional використовуй обережно, невеликими порціями, лише якщо логічно доповнює смак.',
-              'Для простроченого (status expired або daysLeft < 0): наголоси на безпеці — швидкопсувне викинути; рецепт лише якщо реально безпечна категорія (сухі спеції тощо), інакше явно «не вживати».',
-              'Поверни СТРОГО JSON: {"recipes":[{"title":"...","description":"...","ingredients":["..."],"steps":["..."],"urgency":"high"|"medium"}]}.',
-              '1–5 рецептів; кроки короткі; мова українська; urgency high якщо в primary_use є expired або daysLeft ≤ 3.'
-            ].join(' ')
+            content:
+              params.systemContent ??
+              [
+                'Ти кулінарний помічник українського застосунку AppFridge.',
+                'У JSON від користувача є primary_use (термін критичний або закінчився) та secondary_optional (свіжіше).',
+                'Обов’язково: основні страви будуй навколо primary_use — назви конкретні продукти з цього списку в інгредієнтах або описі.',
+                'secondary_optional використовуй обережно, невеликими порціями, лише якщо логічно доповнює смак.',
+                'Для простроченого (status expired або daysLeft < 0): наголоси на безпеці — швидкопсувне викинути; рецепт лише якщо реально безпечна категорія (сухі спеції тощо), інакше явно «не вживати».',
+                'Поверни СТРОГО JSON: {"recipes":[{"title":"...","description":"...","ingredients":["..."],"steps":["..."],"urgency":"high"|"medium"}]}.',
+                '1–5 рецептів; кроки короткі; мова українська; urgency high якщо в primary_use є expired або daysLeft ≤ 3.'
+              ].join(' ')
           },
           {
             role: 'user',
@@ -450,6 +487,76 @@ export async function generateAiRecipeSuggestions(items: InventoryItem[]): Promi
   }
 
   return normalizeRecipes(parsed);
+}
+
+export async function generateAiSaladChefOrders(
+  ingredients: Array<{ name: string; quantity: number }>
+): Promise<SaladChefOrder[]> {
+  const apiKey = resolveOpenAiApiKey();
+  if (!apiKey) {
+    throw new AiNotConfiguredError();
+  }
+  if (ingredients.length === 0) {
+    return [];
+  }
+
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const userBody = {
+    task: 'Згенеруй 2 салати з наведених інгредієнтів.',
+    ingredients
+  };
+
+  let upstream = await requestOpenAiChat({
+    apiKey,
+    model,
+    userBody,
+    includeResponseFormat: true,
+    systemContent: [
+      'Ти шеф-кухар салатів.',
+      'На вхід приходить JSON з ingredients [{name, quantity}].',
+      'Поверни СТРОГО JSON формату: {"salads":[{"name":"...","summary":"...","ingredients":["..."],"steps":["..."]}]}',
+      'Потрібно рівно 2 різні салати.',
+      'Мова українська. Використовуй максимально інгредієнти з вхідного списку.'
+    ].join(' ')
+  });
+
+  if ('status' in upstream && shouldRetryWithoutResponseFormat(upstream.status, upstream.code, upstream.detail)) {
+    upstream = await requestOpenAiChat({
+      apiKey,
+      model,
+      userBody,
+      includeResponseFormat: false,
+      systemContent: [
+        'Ти шеф-кухар салатів.',
+        'Поверни лише JSON: {"salads":[{"name":"...","summary":"...","ingredients":["..."],"steps":["..."]}]}',
+        'Рівно 2 салати, українською.'
+      ].join(' ')
+    });
+  }
+  if ('status' in upstream) {
+    throwForUpstreamFailure(upstream);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractJsonString(upstream.content));
+  } catch {
+    throw new Error('OpenAI returned invalid JSON');
+  }
+  const normalized = normalizeSaladOrders(parsed);
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  const fallback = normalizeRecipes(parsed)
+    .slice(0, 2)
+    .map((r, i) => ({
+      id: `salad-fallback-${i}-${crypto.randomUUID().slice(0, 8)}`,
+      title: r.title,
+      description: r.description,
+      ingredients: r.ingredients,
+      steps: r.steps
+    }));
+  return fallback;
 }
 
 async function requestOpenAiExpiryVision(params: {

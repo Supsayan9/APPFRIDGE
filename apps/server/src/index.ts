@@ -13,6 +13,7 @@ import {
   insertInventoryItem,
   listInventory,
   savePushToken,
+  type ProfileOwner,
   updateInventoryItem,
   upsertProduct
 } from './db.js';
@@ -21,6 +22,7 @@ import {
   AiNotConfiguredError,
   AiRateLimitedError,
   AiServiceUnavailableError,
+  generateAiSaladChefOrders,
   generateAiRecipeSuggestions,
   parseProductNameFromImage,
   parseExpiryDateFromImage
@@ -31,6 +33,10 @@ import { getUrgentInventory, sendReminderPushes } from './reminders.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
+
+function resolveOwner(value: unknown): ProfileOwner {
+  return value === 'rimma' ? 'rimma' : 'vlad';
+}
 
 initDb();
 
@@ -50,8 +56,9 @@ app.get('/products/:barcode', async (req, res) => {
   res.json(product);
 });
 
-app.get('/inventory', (_req, res) => {
-  const items = listInventory();
+app.get('/inventory', (req, res) => {
+  const owner = resolveOwner(req.query.owner);
+  const items = listInventory(owner);
   res.json(
     items.map((item) => ({
       ...item,
@@ -61,7 +68,8 @@ app.get('/inventory', (_req, res) => {
 });
 
 app.post('/inventory', (req, res) => {
-  const body = req.body as Omit<InventoryItem, 'id' | 'createdAt'>;
+  const body = req.body as Omit<InventoryItem, 'id' | 'createdAt'> & { owner?: ProfileOwner };
+  const owner = resolveOwner(body.owner);
   const barcode = normalizeBarcode(String(body.barcode ?? ''));
   if (!barcode) {
     res.status(400).json({ error: 'invalid_barcode', message: 'Потрібен непорожній штрихкод.' });
@@ -93,13 +101,14 @@ app.post('/inventory', (req, res) => {
   const originalExpirationDate = body.location === 'freezer' ? normalizedDate : undefined;
 
   const duplicate = findInventoryDuplicate({
+    owner,
     barcode,
     expirationDate: effectiveExpirationDate,
     originalExpirationDate,
     location: body.location
   });
   if (duplicate) {
-    const merged = updateInventoryItem(duplicate.id, { quantity: duplicate.quantity + quantity });
+    const merged = updateInventoryItem(owner, duplicate.id, { quantity: duplicate.quantity + quantity });
     if (!merged) {
       res.status(500).json({ error: 'merge_failed', message: 'Не вдалося обʼєднати дублікати товару.' });
       return;
@@ -135,7 +144,7 @@ app.post('/inventory', (req, res) => {
   };
 
   const { note: _note, ...forInsert } = item;
-  insertInventoryItem(forInsert);
+  insertInventoryItem(forInsert, owner);
 
   const noteTrim = typeof body.note === 'string' ? body.note.trim() : '';
   upsertProduct({
@@ -155,11 +164,13 @@ app.post('/inventory', (req, res) => {
 });
 
 app.delete('/inventory/:id', (req, res) => {
-  deleteInventoryItem(req.params.id);
+  const owner = resolveOwner(req.query.owner);
+  deleteInventoryItem(owner, req.params.id);
   res.status(204).send();
 });
 
 app.patch('/inventory/:id', (req, res) => {
+  const owner = resolveOwner(req.query.owner);
   const body = req.body as { quantity?: unknown; location?: unknown };
   const patch: Partial<Pick<InventoryItem, 'quantity' | 'location'>> = {};
 
@@ -185,7 +196,7 @@ app.patch('/inventory/:id', (req, res) => {
     return;
   }
 
-  const current = findInventoryItemById(req.params.id);
+  const current = findInventoryItemById(owner, req.params.id);
   if (!current) {
     res.status(404).json({ error: 'not_found', message: 'Продукт не знайдено.' });
     return;
@@ -205,6 +216,7 @@ app.patch('/inventory/:id', (req, res) => {
       targetLocation === 'freezer' ? current.originalExpirationDate ?? current.expirationDate : undefined;
 
     const duplicate = findInventoryDuplicate({
+      owner,
       barcode: current.barcode,
       expirationDate: targetDateForLookup,
       originalExpirationDate: targetOriginalForLookup,
@@ -214,17 +226,17 @@ app.patch('/inventory/:id', (req, res) => {
     if (duplicate && duplicate.id !== current.id) {
       const currentQty = typeof patch.quantity === 'number' ? patch.quantity : current.quantity;
       const mergedQty = currentQty + duplicate.quantity;
-      updated = updateInventoryItem(current.id, {
+      updated = updateInventoryItem(owner, current.id, {
         quantity: mergedQty,
         location: targetLocation
       });
-      deleteInventoryItem(duplicate.id);
+      deleteInventoryItem(owner, duplicate.id);
       mergedRemovedId = duplicate.id;
     } else {
-      updated = updateInventoryItem(req.params.id, patch);
+      updated = updateInventoryItem(owner, req.params.id, patch);
     }
   } else {
-    updated = updateInventoryItem(req.params.id, patch);
+    updated = updateInventoryItem(owner, req.params.id, patch);
   }
 
   if (!updated) {
@@ -241,12 +253,13 @@ app.patch('/inventory/:id', (req, res) => {
   });
 });
 
-app.get('/recipes', (_req, res) => {
-  res.json(buildRecipeSuggestions(listInventory()));
+app.get('/recipes', (req, res) => {
+  const owner = resolveOwner(req.query.owner);
+  res.json(buildRecipeSuggestions(listInventory(owner)));
 });
 
-function resolveAiItems(itemIds: unknown): InventoryItem[] {
-  const all = listInventory();
+function resolveAiItems(owner: ProfileOwner, itemIds: unknown): InventoryItem[] {
+  const all = listInventory(owner);
   if (!Array.isArray(itemIds) || itemIds.length === 0) {
     return all;
   }
@@ -308,13 +321,59 @@ async function handleAiRecipesRequest(items: InventoryItem[], res: express.Respo
   }
 }
 
-app.get('/recipes/ai', async (_req, res) => {
-  await handleAiRecipesRequest(listInventory(), res);
+app.get('/recipes/ai', async (req, res) => {
+  const owner = resolveOwner(req.query.owner);
+  await handleAiRecipesRequest(listInventory(owner), res);
 });
 
 app.post('/recipes/ai', async (req, res) => {
+  const owner = resolveOwner((req.body as { owner?: unknown } | undefined)?.owner);
   const itemIds = (req.body as { itemIds?: unknown } | undefined)?.itemIds;
-  await handleAiRecipesRequest(resolveAiItems(itemIds), res);
+  await handleAiRecipesRequest(resolveAiItems(owner, itemIds), res);
+});
+
+app.post('/recipes/salad-chef', async (req, res) => {
+  const body = req.body as { ingredients?: unknown };
+  const ingredientsRaw = Array.isArray(body.ingredients) ? body.ingredients : [];
+  const ingredients = ingredientsRaw
+    .map((x) =>
+      x && typeof x === 'object'
+        ? {
+            name: String((x as { name?: unknown }).name ?? '').trim(),
+            quantity: Math.max(1, Math.round(Number((x as { quantity?: unknown }).quantity ?? 1)))
+          }
+        : null
+    )
+    .filter((x): x is { name: string; quantity: number } => Boolean(x && x.name));
+
+  if (ingredients.length === 0) {
+    res.status(400).json({ error: 'invalid_ingredients', message: 'Передайте інгредієнти для салату.' });
+    return;
+  }
+
+  try {
+    const salads = await generateAiSaladChefOrders(ingredients);
+    res.json(salads);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof AiNotConfiguredError || message === 'AI_API_KEY_NOT_CONFIGURED') {
+      res.status(503).json({ error: 'ai_unconfigured', message: 'AI не налаштовано на сервері.' });
+      return;
+    }
+    if (error instanceof AiInvalidApiKeyError || message === 'AI_INVALID_API_KEY') {
+      res.status(503).json({ error: 'ai_invalid_key', message: 'AI ключ недійсний.' });
+      return;
+    }
+    if (error instanceof AiRateLimitedError || message === 'AI_RATE_LIMITED') {
+      res.status(429).json({ error: 'ai_rate_limited', message: 'Ліміт запитів AI перевищено.' });
+      return;
+    }
+    if (error instanceof AiServiceUnavailableError || message === 'AI_SERVICE_UNAVAILABLE') {
+      res.status(503).json({ error: 'ai_service_unavailable', message: 'AI сервіс тимчасово недоступний.' });
+      return;
+    }
+    res.status(502).json({ error: 'ai_failed', message: 'Не вдалося згенерувати салати.' });
+  }
 });
 
 app.post('/ai/expiry-from-image', async (req, res) => {

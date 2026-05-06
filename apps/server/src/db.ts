@@ -3,6 +3,7 @@ import type { InventoryItem, Product, PushRegistration } from '@appfridge/shared
 
 const databasePath = process.env.DATABASE_PATH || './appfridge.db';
 export const FREEZER_EXPIRATION_SENTINEL = '9999-12-31';
+export type ProfileOwner = 'vlad' | 'rimma';
 
 export const db = new Database(databasePath);
 db.pragma('journal_mode = WAL');
@@ -24,6 +25,9 @@ function ensureInventoryExtraColumns() {
   const names = new Set(cols.map((c) => c.name));
   if (!names.has('originalExpirationDate')) {
     db.exec(`ALTER TABLE inventory_items ADD COLUMN originalExpirationDate TEXT`);
+  }
+  if (!names.has('owner')) {
+    db.exec(`ALTER TABLE inventory_items ADD COLUMN owner TEXT NOT NULL DEFAULT 'vlad'`);
   }
 }
 
@@ -47,6 +51,7 @@ export function initDb() {
       expirationDate TEXT NOT NULL,
       quantity INTEGER NOT NULL,
       location TEXT NOT NULL,
+      owner TEXT NOT NULL DEFAULT 'vlad',
       createdAt TEXT NOT NULL
     );
 
@@ -56,6 +61,8 @@ export function initDb() {
       createdAt TEXT NOT NULL
     );
   `);
+  ensureProductExtraColumns();
+  ensureInventoryExtraColumns();
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_inventory_exp_created
     ON inventory_items(expirationDate, createdAt DESC);
@@ -65,9 +72,10 @@ export function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_inventory_location_exp
     ON inventory_items(location, expirationDate);
+
+    CREATE INDEX IF NOT EXISTS idx_inventory_owner_exp_created
+    ON inventory_items(owner, expirationDate, createdAt DESC);
   `);
-  ensureProductExtraColumns();
-  ensureInventoryExtraColumns();
 }
 
 export function upsertProduct(product: Product) {
@@ -122,22 +130,23 @@ export function findProduct(barcode: string): Product | undefined {
   };
 }
 
-export function listInventory(): InventoryItem[] {
+export function listInventory(owner: ProfileOwner): InventoryItem[] {
   return db.prepare(`
     SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
     FROM inventory_items
+    WHERE owner = @owner
     ORDER BY expirationDate ASC, createdAt DESC
-  `).all() as InventoryItem[];
+  `).all({ owner }) as InventoryItem[];
 }
 
-export function insertInventoryItem(item: InventoryItem) {
+export function insertInventoryItem(item: InventoryItem, owner: ProfileOwner) {
   db.prepare(`
     INSERT INTO inventory_items (
       id, barcode, name, brand, category, imageUrl, expirationDate, quantity, location, createdAt
-      , originalExpirationDate
+      , originalExpirationDate, owner
     )
     VALUES (
-      @id, @barcode, @name, @brand, @category, @imageUrl, @expirationDate, @quantity, @location, @createdAt, @originalExpirationDate
+      @id, @barcode, @name, @brand, @category, @imageUrl, @expirationDate, @quantity, @location, @createdAt, @originalExpirationDate, @owner
     )
   `).run({
     id: item.id,
@@ -150,11 +159,13 @@ export function insertInventoryItem(item: InventoryItem) {
     originalExpirationDate: item.originalExpirationDate ?? null,
     quantity: item.quantity,
     location: item.location,
+    owner,
     createdAt: item.createdAt
   });
 }
 
 export function findInventoryDuplicate(params: {
+  owner: ProfileOwner;
   barcode: string;
   expirationDate: string;
   originalExpirationDate?: string | null;
@@ -165,11 +176,12 @@ export function findInventoryDuplicate(params: {
       .prepare(
         `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
          FROM inventory_items
-         WHERE barcode = @barcode AND location = @location AND COALESCE(originalExpirationDate, expirationDate) = @originalExpirationDate
+         WHERE owner = @owner AND barcode = @barcode AND location = @location AND COALESCE(originalExpirationDate, expirationDate) = @originalExpirationDate
          ORDER BY createdAt DESC
          LIMIT 1`
       )
       .get({
+        owner: params.owner,
         barcode: params.barcode,
         location: params.location,
         originalExpirationDate: params.originalExpirationDate ?? params.expirationDate
@@ -179,32 +191,34 @@ export function findInventoryDuplicate(params: {
     .prepare(
       `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
        FROM inventory_items
-       WHERE barcode = @barcode AND expirationDate = @expirationDate AND location = @location
+       WHERE owner = @owner AND barcode = @barcode AND expirationDate = @expirationDate AND location = @location
        ORDER BY createdAt DESC
        LIMIT 1`
     )
     .get({
+      owner: params.owner,
       barcode: params.barcode,
       expirationDate: params.expirationDate,
       location: params.location
     }) as InventoryItem | undefined;
 }
 
-export function findInventoryItemById(id: string): InventoryItem | undefined {
+export function findInventoryItemById(owner: ProfileOwner, id: string): InventoryItem | undefined {
   return db
     .prepare(
       `SELECT id, barcode, name, brand, category, imageUrl, expirationDate, originalExpirationDate, quantity, location, createdAt
        FROM inventory_items
-       WHERE id = ?`
+       WHERE owner = @owner AND id = @id`
     )
-    .get(id) as InventoryItem | undefined;
+    .get({ owner, id }) as InventoryItem | undefined;
 }
 
 export function updateInventoryItem(
+  owner: ProfileOwner,
   id: string,
   patch: Partial<Pick<InventoryItem, 'quantity' | 'location'>>
 ): InventoryItem | undefined {
-  const current = findInventoryItemById(id);
+  const current = findInventoryItemById(owner, id);
   if (!current) {
     return undefined;
   }
@@ -227,8 +241,9 @@ export function updateInventoryItem(
   db.prepare(
     `UPDATE inventory_items
      SET quantity = @quantity, location = @location, expirationDate = @expirationDate, originalExpirationDate = @originalExpirationDate
-     WHERE id = @id`
+     WHERE owner = @owner AND id = @id`
   ).run({
+    owner,
     id,
     quantity,
     location,
@@ -236,11 +251,11 @@ export function updateInventoryItem(
     originalExpirationDate
   });
 
-  return findInventoryItemById(id);
+  return findInventoryItemById(owner, id);
 }
 
-export function deleteInventoryItem(id: string) {
-  db.prepare(`DELETE FROM inventory_items WHERE id = ?`).run(id);
+export function deleteInventoryItem(owner: ProfileOwner, id: string) {
+  db.prepare(`DELETE FROM inventory_items WHERE owner = @owner AND id = @id`).run({ owner, id });
 }
 
 export function savePushToken(registration: PushRegistration) {

@@ -24,20 +24,20 @@ async function request(path, init) {
     }
     return (await response.json());
 }
-export function fetchInventory() {
-    return request('/inventory');
+export function fetchInventory(owner) {
+    return request(`/inventory?owner=${encodeURIComponent(owner)}`);
 }
-export function addInventoryItem(input) {
+export function addInventoryItem(owner, input) {
     return request('/inventory', {
         method: 'POST',
-        body: JSON.stringify(input)
+        body: JSON.stringify({ ...input, owner })
     });
 }
-export function removeInventoryItem(id) {
-    return request(`/inventory/${id}`, { method: 'DELETE' });
+export function removeInventoryItem(owner, id) {
+    return request(`/inventory/${id}?owner=${encodeURIComponent(owner)}`, { method: 'DELETE' });
 }
-export function updateInventoryItem(id, patch) {
-    return request(`/inventory/${id}`, {
+export function updateInventoryItem(owner, id, patch) {
+    return request(`/inventory/${id}?owner=${encodeURIComponent(owner)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch)
     });
@@ -46,10 +46,10 @@ export function lookupProduct(barcode) {
     const path = `/products/${encodeURIComponent(barcode)}`;
     return request(path);
 }
-export function fetchRecipes() {
-    return request('/recipes');
+export function fetchRecipes(owner) {
+    return request(`/recipes?owner=${encodeURIComponent(owner)}`);
 }
-export async function fetchAiRecipes(itemIds) {
+export async function fetchAiRecipes(owner, itemIds) {
     let response;
     try {
         response = await fetch(`${apiUrl}/recipes/ai`, {
@@ -58,6 +58,7 @@ export async function fetchAiRecipes(itemIds) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
+                owner,
                 itemIds: Array.isArray(itemIds) && itemIds.length > 0 ? itemIds : undefined
             })
         });
@@ -93,6 +94,37 @@ export function unregisterPushToken(token) {
         method: 'POST',
         body: JSON.stringify({ token })
     });
+}
+export async function fetchSaladChefOrders(payload) {
+    let response;
+    try {
+        response = await fetch(`${apiUrl}/recipes/salad-chef`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+    }
+    catch {
+        throw new AiRequestError('Не вдалося зʼєднатися з сервером для салатів.', 0);
+    }
+    if (!response.ok) {
+        let detail = `Помилка ${response.status}`;
+        let errorCode;
+        try {
+            const body = (await response.json());
+            if (body.message) {
+                detail = body.message;
+            }
+            errorCode = body.error;
+        }
+        catch {
+            // ignore
+        }
+        throw new AiRequestError(detail, response.status, errorCode);
+    }
+    return (await response.json());
 }
 export async function scanExpiryDateFromImage(payload) {
     let response;

@@ -25,7 +25,7 @@ function buildReminderMessage(item: InventoryItem): string {
 }
 
 export function getUrgentInventory(now = new Date()): InventoryItem[] {
-  return listInventory().filter((item) => getInventoryInsight(item, now).status !== 'fresh');
+  return [...listInventory('vlad'), ...listInventory('rimma')].filter((item) => getInventoryInsight(item, now).status !== 'fresh');
 }
 
 export async function sendReminderPushes() {
