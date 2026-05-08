@@ -33,6 +33,7 @@ const state = {
   scannerOpen: false,
   scannerStep: 'barcode',
   savingItem: false,
+  scanningPhoto: false,
   current: {
     barcode: '',
     name: '',
@@ -127,7 +128,9 @@ function renderProductCard(item) {
 
 function renderRecipeCard(recipe, index) {
   const expanded = Boolean(state.aiExpanded[index]);
-  const content = recipe.content || recipe.description || '';
+  const ingredients = Array.isArray(recipe.ingredients) ? recipe.ingredients.join(', ') : '';
+  const steps = Array.isArray(recipe.steps) ? recipe.steps.map((s, i) => `${i + 1}. ${s}`).join('\n') : '';
+  const content = recipe.content || recipe.description || [ingredients && `Інгредієнти: ${ingredients}`, steps].filter(Boolean).join('\n\n');
   return `
     <article class="recipe-card">
       <button class="recipe-head" data-expand="${index}">
@@ -171,7 +174,10 @@ function renderScannerModal() {
         ${step === 'barcode' ? `
           <label>Штрихкод</label>
           <input id="scan-barcode" placeholder="Введи або встав код" value="${escapeHtml(state.current.barcode)}" />
+          <label>Або фото штрихкоду</label>
+          <input id="scan-barcode-photo" type="file" accept="image/*" />
           <div class="actions single">
+            <button class="ghost" ${state.scanningPhoto ? 'disabled' : ''} data-scan-barcode-photo="1">${state.scanningPhoto ? 'Скануємо...' : 'Сканувати штрихкод з фото'}</button>
             <button data-next-barcode="1">Далі</button>
           </div>
         ` : ''}
@@ -179,10 +185,13 @@ function renderScannerModal() {
         ${step === 'name' ? `
           <label>Назва продукту</label>
           <input id="scan-name" placeholder="Введи назву" value="${escapeHtml(state.current.name)}" />
+          <label>Або фото назви</label>
+          <input id="scan-name-photo" type="file" accept="image/*" />
           <label>Кількість</label>
           <input id="scan-qty" type="number" min="1" max="99" value="${escapeHtml(state.current.quantity)}" />
           <div class="actions">
             <button class="ghost" data-prev-step="barcode">Назад</button>
+            <button class="ghost" ${state.scanningPhoto ? 'disabled' : ''} data-scan-name-photo="1">${state.scanningPhoto ? 'Скануємо...' : 'Сканувати назву з фото'}</button>
             <button data-next-name="1">Далі</button>
           </div>
         ` : ''}
@@ -194,7 +203,7 @@ function renderScannerModal() {
           <input id="scan-photo" type="file" accept="image/*" />
           <div class="actions">
             <button class="ghost" data-prev-step="name">Назад</button>
-            <button data-ai-date="1">Зчитати з фото</button>
+            <button ${state.scanningPhoto ? 'disabled' : ''} data-ai-date="1">${state.scanningPhoto ? 'Зчитуємо...' : 'Зчитати з фото'}</button>
             <button data-next-date="1">Далі</button>
           </div>
         ` : ''}
@@ -281,7 +290,6 @@ function render() {
         <p>Обирай продукти і отримуй 5 рецептів.</p>
         <div class="actions">
           <button id="open-scanner">Відкрити сканер</button>
-          <button id="refresh" ${state.loading ? 'disabled' : ''}>Оновити продукти</button>
           <button id="ai" ${state.loading ? 'disabled' : ''}>Отримати AI-рецепти ${selectedCount ? `(${selectedCount})` : ''}</button>
         </div>
       </section>
@@ -345,7 +353,6 @@ function bindEvents() {
   });
 
   const openScanner = document.getElementById('open-scanner');
-  const refreshEl = document.getElementById('refresh');
   const aiEl = document.getElementById('ai');
   const openSalad = document.getElementById('open-salad');
   const toggleFav = document.getElementById('toggle-fav-salads');
@@ -365,7 +372,6 @@ function bindEvents() {
     render();
   });
 
-  refreshEl?.addEventListener('click', () => loadInventory());
   aiEl?.addEventListener('click', () => loadAi());
   openSalad?.addEventListener('click', () => {
     state.saladOpen = true;
@@ -458,6 +464,29 @@ function bindEvents() {
     });
   });
 
+  app.querySelectorAll('[data-scan-barcode-photo]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const file = document.getElementById('scan-barcode-photo')?.files?.[0];
+      if (!file) return toast('Додай фото штрихкоду');
+      state.scanningPhoto = true;
+      render();
+      try {
+        const barcode = await detectBarcodeFromImage(file);
+        if (!barcode) {
+          toast('Не вдалося розпізнати штрихкод. Введи вручну.');
+          return;
+        }
+        state.current.barcode = barcode;
+        state.scannerStep = 'name';
+      } catch {
+        toast('Не вдалося розпізнати штрихкод. Введи вручну.');
+      } finally {
+        state.scanningPhoto = false;
+        render();
+      }
+    });
+  });
+
   app.querySelectorAll('[data-next-name]').forEach((el) => {
     el.addEventListener('click', () => {
       const name = document.getElementById('scan-name')?.value?.trim();
@@ -470,25 +499,62 @@ function bindEvents() {
     });
   });
 
+  app.querySelectorAll('[data-scan-name-photo]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const file = document.getElementById('scan-name-photo')?.files?.[0];
+      if (!file) return toast('Додай фото назви');
+      state.scanningPhoto = true;
+      render();
+      try {
+        const base64 = await fileToBase64(file);
+        const res = await fetch(`${apiUrl}/ai/name-from-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64, mimeType: file.type || 'image/jpeg' })
+        });
+        if (!res.ok) {
+          const err = await safeJson(res);
+          throw new Error(err?.message || 'Не вдалося зчитати назву');
+        }
+        const data = await res.json();
+        if (!data?.name) {
+          throw new Error('Не вдалося зчитати назву');
+        }
+        state.current.name = data.name;
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'Не вдалося зчитати назву');
+      } finally {
+        state.scanningPhoto = false;
+        render();
+      }
+    });
+  });
+
   app.querySelectorAll('[data-ai-date]').forEach((el) => {
     el.addEventListener('click', async () => {
       const file = document.getElementById('scan-photo')?.files?.[0];
       if (!file) return toast('Додай фото дати');
-
-      const base64 = await fileToBase64(file);
+      state.scanningPhoto = true;
+      render();
       try {
+        const base64 = await fileToBase64(file);
         const res = await fetch(`${apiUrl}/ai/expiry-from-image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageBase64: base64, mimeType: file.type || 'image/jpeg' })
         });
-        if (!res.ok) throw new Error('scan_failed');
+        if (!res.ok) {
+          const err = await safeJson(res);
+          throw new Error(err?.message || 'Не вдалося зчитати дату');
+        }
         const data = await res.json();
         state.current.expirationDate = data.isoDate;
         toast(`Знайшли дату: ${data.isoDate}`);
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'Не вдалося зчитати дату, введи вручну.');
+      } finally {
+        state.scanningPhoto = false;
         render();
-      } catch {
-        toast('Не вдалося зчитати дату, введи вручну.');
       }
     });
   });
@@ -616,12 +682,17 @@ async function loadAi() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ owner: state.owner, itemIds: ids.length ? ids : undefined })
     });
-    state.ai = await res.json();
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.message || 'AI помічник тимчасово недоступний');
+    }
+    const data = await res.json();
+    state.ai = Array.isArray(data) ? data.slice(0, 5) : [];
     state.aiExpanded = {};
     state.aiSelected.clear();
-  } catch {
+  } catch (error) {
     state.ai = [];
-    toast('Не вдалося отримати AI-рецепти');
+    toast(error instanceof Error ? error.message : 'Не вдалося отримати AI-рецепти');
   } finally {
     state.loading = false;
     render();
@@ -670,6 +741,27 @@ function fileToBase64(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+async function safeJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function detectBarcodeFromImage(file) {
+  if (!('BarcodeDetector' in window)) {
+    throw new Error('Цей браузер не підтримує скан штрихкоду з фото.');
+  }
+  const detector = new window.BarcodeDetector({
+    formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf']
+  });
+  const bitmap = await createImageBitmap(file);
+  const found = await detector.detect(bitmap);
+  bitmap.close();
+  return found?.[0]?.rawValue?.trim() || '';
 }
 
 render();

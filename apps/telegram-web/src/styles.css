@@ -68,7 +68,7 @@ body {
 h2 { margin: 0; font-size: 24px; }
 .ai-card p { margin: 8px 0 0; color: #b8c7ef; }
 
-.actions { margin-top: 12px; display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+.actions { margin-top: 12px; display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
 .actions.single { grid-template-columns: 1fr; }
 button {
   border: 0;
