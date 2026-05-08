@@ -1,0 +1,74 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #2d1b4d, #120a23 64%);
+  color: #eef5ff;
+}
+
+.shell {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.hero, .card {
+  background: rgba(34, 20, 60, 0.92);
+  border: 1px solid rgba(164, 96, 255, 0.35);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.hero h1 { margin: 0 0 6px; font-size: 22px; }
+.hero p { margin: 0; color: #cfc1e8; }
+
+.card h2 { margin: 0 0 10px; font-size: 18px; }
+label { display: block; margin-bottom: 8px; color: #ddd2f3; }
+select, button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+select {
+  background: #3b2360;
+  color: #fff;
+  margin-bottom: 10px;
+}
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+button {
+  background: #7e22ce;
+  color: #fff;
+  font-weight: 700;
+}
+button:disabled { opacity: 0.55; }
+
+ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+li {
+  background: rgba(44, 30, 74, 0.78);
+  border: 1px solid rgba(166, 129, 255, 0.3);
+  border-radius: 10px;
+  padding: 9px 10px;
+  display: grid;
+  gap: 3px;
+}
+li b { font-size: 15px; }
+li span { color: #d6caec; font-size: 13px; }
+.muted { color: #b9a9d8; margin: 0; }
